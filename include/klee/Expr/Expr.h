@@ -176,6 +176,10 @@ public:
   /// @brief Required by klee::ref-managed objects
   class ReferenceCounter _refCount;
 
+	//added by liupei stand for whether it is a float point
+	bool isFloat;
+	///@hy
+	bool isTaint;
 protected:  
   unsigned hashValue;
 
@@ -204,7 +208,7 @@ protected:
   virtual int compareContents(const Expr &b) const = 0;
 
 public:
-  Expr() { Expr::count++; }
+  Expr() : isFloat(false), isTaint(false), hashValue(0)  { Expr::count++; }
   virtual ~Expr() { Expr::count--; } 
 
   virtual Kind getKind() const = 0;
@@ -499,7 +503,7 @@ public:
 
 private:
   unsigned hashValue;
-
+public:
   // FIXME: Make =delete when we switch to C++11
   Array(const Array& array);
 

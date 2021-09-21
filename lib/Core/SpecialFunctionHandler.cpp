@@ -71,76 +71,100 @@ static SpecialFunctionHandler::HandlerInfo handlerInfo[] = {
 #define addDNR(name, handler) { name, \
                                 &SpecialFunctionHandler::handler, \
                                 true, false, false }
-  addDNR("__assert_rtn", handleAssertFail),
-  addDNR("__assert_fail", handleAssertFail),
-  addDNR("__assert", handleAssertFail),
-  addDNR("_assert", handleAssert),
-  addDNR("abort", handleAbort),
-  addDNR("_exit", handleExit),
-  { "exit", &SpecialFunctionHandler::handleExit, true, false, true },
-  addDNR("klee_abort", handleAbort),
-  addDNR("klee_silent_exit", handleSilentExit),
-  addDNR("klee_report_error", handleReportError),
-  add("calloc", handleCalloc, true),
-  add("free", handleFree, false),
-  add("klee_assume", handleAssume, false),
-  add("klee_check_memory_access", handleCheckMemoryAccess, false),
-  add("klee_get_valuef", handleGetValue, true),
-  add("klee_get_valued", handleGetValue, true),
-  add("klee_get_valuel", handleGetValue, true),
-  add("klee_get_valuell", handleGetValue, true),
-  add("klee_get_value_i32", handleGetValue, true),
-  add("klee_get_value_i64", handleGetValue, true),
-  add("klee_define_fixed_object", handleDefineFixedObject, false),
-  add("klee_get_obj_size", handleGetObjSize, true),
-  add("klee_get_errno", handleGetErrno, true),
+    addDNR("__assert_rtn", handleAssertFail),
+    addDNR("__assert_fail", handleAssertFail),
+    addDNR("__assert", handleAssertFail),
+    addDNR("_assert", handleAssert),
+    addDNR("abort", handleAbort),
+    addDNR("_exit", handleExit),
+    {"exit", &SpecialFunctionHandler::handleExit, true, false, true},
+    addDNR("klee_abort", handleAbort),
+    addDNR("klee_silent_exit", handleSilentExit),
+    addDNR("klee_report_error", handleReportError),
+    add("calloc", handleCalloc, true),
+    add("free", handleFree, false),
+    add("klee_assume", handleAssume, false),
+    add("klee_check_memory_access", handleCheckMemoryAccess, false),
+    add("klee_get_valuef", handleGetValue, true),
+    add("klee_get_valued", handleGetValue, true),
+    add("klee_get_valuel", handleGetValue, true),
+    add("klee_get_valuell", handleGetValue, true),
+    add("klee_get_value_i32", handleGetValue, true),
+    add("klee_get_value_i64", handleGetValue, true),
+    add("klee_define_fixed_object", handleDefineFixedObject, false),
+    add("klee_get_obj_size", handleGetObjSize, true),
+    add("klee_get_errno", handleGetErrno, true),
 #ifndef __APPLE__
-  add("__errno_location", handleErrnoLocation, true),
+    add("__errno_location", handleErrnoLocation, true),
 #else
-  add("__error", handleErrnoLocation, true),
+    add("__error", handleErrnoLocation, true),
 #endif
-  add("klee_is_symbolic", handleIsSymbolic, true),
-  add("klee_make_symbolic", handleMakeSymbolic, false),
-  add("klee_mark_global", handleMarkGlobal, false),
-  add("klee_open_merge", handleOpenMerge, false),
-  add("klee_close_merge", handleCloseMerge, false),
-  add("klee_prefer_cex", handlePreferCex, false),
-  add("klee_posix_prefer_cex", handlePosixPreferCex, false),
-  add("klee_print_expr", handlePrintExpr, false),
-  add("klee_print_range", handlePrintRange, false),
-  add("klee_set_forking", handleSetForking, false),
-  add("klee_stack_trace", handleStackTrace, false),
-  add("klee_warning", handleWarning, false),
-  add("klee_warning_once", handleWarningOnce, false),
-  add("malloc", handleMalloc, true),
-  add("memalign", handleMemalign, true),
-  add("realloc", handleRealloc, true),
-  add("_klee_eh_Unwind_RaiseException_impl", handleEhUnwindRaiseExceptionImpl, false),
+    add("klee_is_symbolic", handleIsSymbolic, true),
+    add("klee_make_symbolic", handleMakeSymbolic, false),
+    add("klee_mark_global", handleMarkGlobal, false),
+    add("klee_open_merge", handleOpenMerge, false),
+    add("klee_close_merge", handleCloseMerge, false),
+    add("klee_prefer_cex", handlePreferCex, false),
+    add("klee_posix_prefer_cex", handlePosixPreferCex, false),
+    add("klee_print_expr", handlePrintExpr, false),
+    add("klee_print_range", handlePrintRange, false),
+    add("klee_set_forking", handleSetForking, false),
+    add("klee_stack_trace", handleStackTrace, false),
+    add("klee_warning", handleWarning, false),
+    add("klee_warning_once", handleWarningOnce, false),
+    add("malloc", handleMalloc, true),
+    add("memalign", handleMemalign, true),
+    add("realloc", handleRealloc, true),
+    add("_klee_eh_Unwind_RaiseException_impl", handleEhUnwindRaiseExceptionImpl,
+        false),
 
-  // operator delete[](void*)
-  add("_ZdaPv", handleDeleteArray, false),
-  // operator delete(void*)
-  add("_ZdlPv", handleDelete, false),
+    // operator delete[](void*)
+    add("_ZdaPv", handleDeleteArray, false),
+    // operator delete(void*)
+    add("_ZdlPv", handleDelete, false),
 
-  // operator new[](unsigned int)
-  add("_Znaj", handleNewArray, true),
-  // operator new(unsigned int)
-  add("_Znwj", handleNew, true),
+    // operator new[](unsigned int)
+    add("_Znaj", handleNewArray, true),
+    // operator new(unsigned int)
+    add("_Znwj", handleNew, true),
 
-  // FIXME-64: This is wrong for 64-bit long...
+    // FIXME-64: This is wrong for 64-bit long...
 
-  // operator new[](unsigned long)
-  add("_Znam", handleNewArray, true),
-  // operator new(unsigned long)
-  add("_Znwm", handleNew, true),
+    // operator new[](unsigned long)
+    add("_Znam", handleNewArray, true),
+    // operator new(unsigned long)
+    add("_Znwm", handleNew, true),
 
-  // Run clang with -fsanitize=signed-integer-overflow and/or
-  // -fsanitize=unsigned-integer-overflow
-  add("__ubsan_handle_add_overflow", handleAddOverflow, false),
-  add("__ubsan_handle_sub_overflow", handleSubOverflow, false),
-  add("__ubsan_handle_mul_overflow", handleMulOverflow, false),
-  add("__ubsan_handle_divrem_overflow", handleDivRemOverflow, false),
-  add("klee_eh_typeid_for", handleEhTypeid, true),
+    // Run clang with -fsanitize=signed-integer-overflow and/or
+    // -fsanitize=unsigned-integer-overflow
+    add("__ubsan_handle_add_overflow", handleAddOverflow, false),
+    add("__ubsan_handle_sub_overflow", handleSubOverflow, false),
+    add("__ubsan_handle_mul_overflow", handleMulOverflow, false),
+    add("__ubsan_handle_divrem_overflow", handleDivRemOverflow, false),
+    add("klee_eh_typeid_for", handleEhTypeid, true),
+
+    //@ylc handle pthread
+    add("pthread_create", handlePThreadCreate, true),
+    add("pthread_exit", handlePThreadExit, true),
+    add("pthread_cancel", handlePThreadCancel, true),
+    add("pthread_join", handlePThreadJoin, true),
+    add("pthread_testcancel", handlePThreadTestCancel, false),
+    //		add("pthread_mutex_init", handlePThreadMutexInit, true),
+    ////KLEE自带了External机制
+    add("pthread_mutex_lock", handlePThreadMutexLock, true),
+    add("pthread_mutex_unlock", handlePThreadMutexUnlock, true),
+    //		add("pthread_cond_init", handlePThreadCondInit, true),
+    add("pthread_cond_wait", handlePThreadCondWait, true),
+    add("pthread_cond_signal", handlePThreadCondSignal, true),
+    add("pthread_cond_broadcast", handlePThreadCondBroadcast, true),
+    add("pthread_barrier_init", handlePThreadBarrierInit, true),
+    add("pthread_barrier_wait", handlePThreadBarrierWait, true),
+    add("pthread_barrier_destory", handlePThreadBarrierDestory, true),
+    add("pthread_self", handlePThreadSelf, true),
+    add("valloc", handleValloc, true),
+    //@hy
+    add("make_taint", handleMakeTaint, false),
+    add("Send_Data", handleSendData, false),
 
 #undef addDNR
 #undef add
@@ -482,7 +506,7 @@ void SpecialFunctionHandler::handleEhUnwindRaiseExceptionImpl(
 
   state.unwindingInformation =
       std::make_unique<SearchPhaseUnwindingInformation>(exceptionObject,
-                                                        state.stack.size() - 1);
+                                                        state.currentStack->realStack.size() - 1);
 
   executor.unwindToNextLandingpad(state);
 }
@@ -588,7 +612,7 @@ void SpecialFunctionHandler::handleSetForking(ExecutionState &state,
 void SpecialFunctionHandler::handleStackTrace(ExecutionState &state,
                                               KInstruction *target,
                                               std::vector<ref<Expr> > &arguments) {
-  state.dumpStack(outs());
+  state.currentThread->dumpStack(outs());
 }
 
 void SpecialFunctionHandler::handleWarning(ExecutionState &state,
@@ -597,7 +621,7 @@ void SpecialFunctionHandler::handleWarning(ExecutionState &state,
   assert(arguments.size()==1 && "invalid number of arguments to klee_warning");
 
   std::string msg_str = readStringAtAddress(state, arguments[0]);
-  klee_warning("%s: %s", state.stack.back().kf->function->getName().data(), 
+  klee_warning("%s: %s", state.currentStack->realStack.back().kf->function->getName().data(), 
                msg_str.c_str());
 }
 
@@ -608,7 +632,7 @@ void SpecialFunctionHandler::handleWarningOnce(ExecutionState &state,
          "invalid number of arguments to klee_warning_once");
 
   std::string msg_str = readStringAtAddress(state, arguments[0]);
-  klee_warning_once(0, "%s: %s", state.stack.back().kf->function->getName().data(),
+  klee_warning_once(0, "%s: %s", state.currentStack->realStack.back().kf->function->getName().data(),
                     msg_str.c_str());
 }
 
@@ -816,7 +840,7 @@ void SpecialFunctionHandler::handleDefineFixedObject(ExecutionState &state,
   
   uint64_t address = cast<ConstantExpr>(arguments[0])->getZExtValue();
   uint64_t size = cast<ConstantExpr>(arguments[1])->getZExtValue();
-  MemoryObject *mo = executor.memory->allocateFixed(address, size, state.prevPC->inst);
+  MemoryObject *mo = executor.memory->allocateFixed(address, size, state.currentThread->prevPC->inst);
   executor.bindObjectInState(state, mo, false);
   mo->isUserSpecified = true; // XXX hack;
 }
@@ -918,4 +942,136 @@ void SpecialFunctionHandler::handleDivRemOverflow(ExecutionState &state,
                                                std::vector<ref<Expr> > &arguments) {
   executor.terminateStateOnError(state, "overflow on division or remainder",
                                  Executor::Overflow);
+}
+
+void SpecialFunctionHandler::handlePThreadCreate(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread create" << std::endl;
+  unsigned result = executor.executePThreadCreate(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadJoin(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  unsigned result = executor.executePThreadJoin(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadCancel(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread cancel" << std::endl;
+}
+
+void SpecialFunctionHandler::handlePThreadTestCancel(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread test cancel" << std::endl;
+}
+
+void SpecialFunctionHandler::handlePThreadMutexLock(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread mutex lock" << std::endl;
+  unsigned result = executor.executePThreadMutexLock(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadMutexUnlock(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread mutex unlock" << std::endl;
+  unsigned result =
+      executor.executePThreadMutexUnlock(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadCondWait(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread cond wait" << std::endl;
+  unsigned result = executor.executePThreadCondWait(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadCondSignal(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread cond signal" << std::endl;
+  unsigned result = executor.executePThreadCondSignal(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadCondBroadcast(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // std::cerr << "catch pthread cond signal" << std::endl;
+  unsigned result =
+      executor.executePThreadCondBroadcast(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadExit(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  // executor.terminateStateOnExit(state);
+}
+
+void SpecialFunctionHandler::handlePThreadBarrierInit(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  unsigned result =
+      executor.executePThreadBarrierInit(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadBarrierWait(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  unsigned result =
+      executor.executePThreadBarrierWait(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadBarrierDestory(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  unsigned result =
+      executor.executePThreadBarrierDestory(state, target, arguments);
+  executor.bindLocal(target, state, ConstantExpr::create(result, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handlePThreadSelf(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+  executor.bindLocal(
+      target, state,
+      ConstantExpr::create(state.currentThread->threadId, Expr::Int32));
+}
+
+void SpecialFunctionHandler::handleValloc(ExecutionState &state,
+                                          KInstruction *target,
+                                          std::vector<ref<Expr>> &arguments) {
+  assert(arguments.size() == 1 && "invalid number of arguments to valloc");
+  executor.executeAlloc(state, arguments[0], false, target);
+}
+
+void SpecialFunctionHandler::handleMakeTaint(
+    ExecutionState &state, KInstruction *target,
+    std::vector<ref<Expr>> &arguments) {
+
+  assert(arguments.size() == 1 &&
+         "invalid number of arguments to klee_make_taint");
+  // doing nothing, and really do it at TaintListener.
+}
+
+void SpecialFunctionHandler::handleSendData(ExecutionState &state,
+                                            KInstruction *target,
+                                            std::vector<ref<Expr>> &arguments) {
+
+  assert(arguments.size() == 1 &&
+         "invalid number of arguments to klee_send_data");
+  // doing nothing, and really do it at TaintListener.
 }

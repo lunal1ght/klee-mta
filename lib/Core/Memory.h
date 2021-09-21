@@ -195,6 +195,8 @@ public:
   unsigned size;
 
   bool readOnly;
+  ///@hy
+  std::set<ref<Expr> > isTaint;
 
 public:
   /// Create a new object state for the given memory object with concrete
@@ -206,12 +208,18 @@ public:
   /// contents.
   ObjectState(const MemoryObject *mo, const Array *array);
 
+  //@hy
+  ObjectState(unsigned size, const Array *array);
+
   ObjectState(const ObjectState &os);
   ~ObjectState();
 
   const MemoryObject *getObject() const { return object.get(); }
 
   void setReadOnly(bool ro) { readOnly = ro; }
+  
+  void insertTaint(ref<Expr> address) { isTaint.insert(address); }
+  void eraseTaint(ref<Expr> address) { isTaint.erase(address); }
 
   // make contents all concrete and zero
   void initializeToZero();

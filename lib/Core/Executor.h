@@ -30,6 +30,9 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "../Thread/StackType.h"
+#include "../Encode/ListenerService.h"
+
 #include <map>
 #include <memory>
 #include <set>
@@ -93,6 +96,10 @@ class Executor : public Interpreter {
   friend class StatsTracker;
   friend class MergeHandler;
   friend klee::Searcher *klee::constructUserSearcher(Executor &executor);
+  friend class ListenerService;
+  friend class PSOListener;
+  friend class SymbolicListener;
+  friend class TaintListener;
 
 public:
   typedef std::pair<ExecutionState*,ExecutionState*> StatePair;
@@ -117,6 +124,8 @@ public:
 
   /// The random number generator.
   RNG theRNG;
+
+  enum ExecStatus { SUCCESS, IGNOREDERROR, RUNTIMEERROR };
 
 private:
   static const char *TerminateReasonNames[];
@@ -224,6 +233,18 @@ private:
 
   /// Typeids used during exception handling
   std::vector<ref<Expr>> eh_typeids;
+
+  ListenerService *listenerService;
+
+  bool isFinished; // whether the verification is finished
+
+  Prefix *prefix; // prefix used to guide execution
+
+  unsigned executionNum; // total number of execution
+
+  ExecStatus execStatus;
+
+  bool hasInitialized = 0;
 
   /// Return the typeid corresponding to a certain `type_info`
   ref<ConstantExpr> getEhTypeidFor(ref<Expr> type_info);
@@ -336,6 +357,8 @@ private:
                               ref<Expr> address,
                               ref<Expr> value /* undef if read */,
                               KInstruction *target /* undef if write */);
+  ref<Expr> readExpr(ExecutionState &state, AddressSpace *addressSpace,
+                     ref<Expr> address, Expr::Width size);
 
   void executeMakeSymbolic(ExecutionState &state, const MemoryObject *mo,
                            const std::string &name);
@@ -366,15 +389,21 @@ private:
   const Cell& eval(KInstruction *ki, unsigned index, 
                    ExecutionState &state) const;
 
+  const Cell &evalCurrent(KInstruction *ki, unsigned index,
+                          ExecutionState &state) const;
+
+  void ineval(KInstruction *ki, unsigned index, ExecutionState &state,
+              ref<Expr> value) const;
+
   Cell& getArgumentCell(ExecutionState &state,
                         KFunction *kf,
                         unsigned index) {
-    return state.stack.back().locals[kf->getArgRegister(index)];
+    return state.currentStack->realStack.back().locals[kf->getArgRegister(index)];
   }
 
   Cell& getDestCell(ExecutionState &state,
                     KInstruction *target) {
-    return state.stack.back().locals[target->dest];
+    return state.currentStack->realStack.back().locals[target->dest];
   }
 
   void bindLocal(KInstruction *target, 
@@ -479,6 +508,42 @@ private:
   void dumpStates();
   void dumpPTree();
 
+  // add by ylc to support pthread
+  unsigned executePThreadCreate(ExecutionState &state, KInstruction *ki,
+                                std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadJoin(ExecutionState &state, KInstruction *ki,
+                              std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadCondWait(ExecutionState &state, KInstruction *ki,
+                                  std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadCondSignal(ExecutionState &state, KInstruction *ki,
+                                    std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadCondBroadcast(ExecutionState &state, KInstruction *ki,
+                                       std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadMutexLock(ExecutionState &state, KInstruction *ki,
+                                   std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadMutexUnlock(ExecutionState &state, KInstruction *ki,
+                                     std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
+                                     std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadBarrierWait(ExecutionState &state, KInstruction *ki,
+                                     std::vector<ref<Expr>> &arguments);
+
+  unsigned executePThreadBarrierDestory(ExecutionState &state, KInstruction *ki,
+                                        std::vector<ref<Expr>> &arguments);
+
+  void handleInitializers(ExecutionState &initialState);
+
+  void createSpecialElement(ExecutionState &state, llvm::Type *type,
+                            uint64_t &startAddress, bool isInitializer);
+
 public:
   Executor(llvm::LLVMContext &ctx, const InterpreterOptions &opts,
       InterpreterHandler *ie);
@@ -551,6 +616,18 @@ public:
 
   MergingSearcher *getMergingSearcher() const { return mergingSearcher; };
   void setMergingSearcher(MergingSearcher *ms) { mergingSearcher = ms; };
+
+  bool getMemoryObject(ObjectPair &op, ExecutionState &state,
+                       AddressSpace *addressSpace, ref<Expr> address);
+
+  bool isGlobalMO(const MemoryObject *mo);
+  TimingSolver *getTimeSolver() { return solver; }
+  bool isFunctionSpecial(llvm::Function *f);
+  void runVerification(llvm::Function *f, int argc, char **argv, char **envp);
+  void prepareNextExecution();
+  void getNewPrefix();
+  void printInstrcution(ExecutionState &state, KInstruction *ki);
+  void printPrefix();
 };
   
 } // End klee namespace

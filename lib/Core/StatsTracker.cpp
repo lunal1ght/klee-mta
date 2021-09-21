@@ -109,7 +109,7 @@ cl::opt<std::string> UncoveredUpdateInterval(
     cl::desc("Update interval for uncovered instructions (default=30s)"),
     cl::cat(StatsCat));
 
-cl::opt<bool> UseCallPaths("use-call-paths", cl::init(true),
+cl::opt<bool> UseCallPaths("use-call-paths", cl::init(false),
                            cl::desc("Enable calltree tracking for instruction "
                                     "level statistics (default=true)"),
                            cl::cat(StatsCat));
@@ -345,9 +345,9 @@ void StatsTracker::stepInstruction(ExecutionState &es) {
       }
     }
 
-    Instruction *inst = es.pc->inst;
-    const InstructionInfo &ii = *es.pc->info;
-    StackFrame &sf = es.stack.back();
+    Instruction *inst = es.currentThread->pc->inst;
+    const InstructionInfo &ii = *es.currentThread->pc->info;
+    StackFrame &sf = es.currentStack->realStack.back();
     theStatisticManager->setIndex(ii.id);
     if (UseCallPaths)
       theStatisticManager->setContext(&sf.callPathNode->statistics);
@@ -385,7 +385,7 @@ void StatsTracker::stepInstruction(ExecutionState &es) {
 /* Should be called _after_ the es->pushFrame() */
 void StatsTracker::framePushed(ExecutionState &es, StackFrame *parentFrame) {
   if (OutputIStats) {
-    StackFrame &sf = es.stack.back();
+    StackFrame &sf = es.currentStack->realStack.back();
 
     if (UseCallPaths) {
       CallPathNode *parent = parentFrame ? parentFrame->callPathNode : 0;
@@ -398,7 +398,7 @@ void StatsTracker::framePushed(ExecutionState &es, StackFrame *parentFrame) {
   }
 
   if (updateMinDistToUncovered) {
-    StackFrame &sf = es.stack.back();
+    StackFrame &sf = es.currentStack->realStack.back();
 
     uint64_t minDistAtRA = 0;
     if (parentFrame)
@@ -572,10 +572,10 @@ void StatsTracker::updateStateStatistics(uint64_t addend) {
   for (std::set<ExecutionState*>::iterator it = executor.states.begin(),
          ie = executor.states.end(); it != ie; ++it) {
     ExecutionState &state = **it;
-    const InstructionInfo &ii = *state.pc->info;
+    const InstructionInfo &ii = *state.currentThread->pc->info;
     theStatisticManager->incrementIndexedValue(stats::states, ii.id, addend);
     if (UseCallPaths)
-      state.stack.back().callPathNode->statistics.incrementValue(stats::states, addend);
+      state.currentStack->realStack.back().callPathNode->statistics.incrementValue(stats::states, addend);
   }
 }
 
@@ -1000,13 +1000,13 @@ void StatsTracker::computeReachableUncovered() {
          ie = executor.states.end(); it != ie; ++it) {
     ExecutionState *es = *it;
     uint64_t currentFrameMinDist = 0;
-    for (ExecutionState::stack_ty::iterator sfIt = es->stack.begin(),
-           sf_ie = es->stack.end(); sfIt != sf_ie; ++sfIt) {
+    for (ExecutionState::stack_ty::iterator sfIt = es->currentStack->realStack.begin(),
+           sf_ie = es->currentStack->realStack.end(); sfIt != sf_ie; ++sfIt) {
       ExecutionState::stack_ty::iterator next = sfIt + 1;
       KInstIterator kii;
 
-      if (next==es->stack.end()) {
-        kii = es->pc;
+      if (next==es->currentStack->realStack.end()) {
+        kii = es->currentThread->pc;
       } else {
         kii = next->caller;
         ++kii;

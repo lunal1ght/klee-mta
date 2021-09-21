@@ -144,6 +144,25 @@ namespace klee {
     HANDLER(handleMulOverflow);
     HANDLER(handleSubOverflow);
     HANDLER(handleDivRemOverflow);
+    //@ylc
+    HANDLER(handlePThreadCreate);
+    HANDLER(handlePThreadExit);
+    HANDLER(handlePThreadJoin);
+    HANDLER(handlePThreadCancel);
+    HANDLER(handlePThreadTestCancel);
+    HANDLER(handlePThreadMutexLock);
+    HANDLER(handlePThreadMutexUnlock);
+    HANDLER(handlePThreadCondWait);
+    HANDLER(handlePThreadCondSignal);
+    HANDLER(handlePThreadCondBroadcast);
+    HANDLER(handlePThreadBarrierInit);
+    HANDLER(handlePThreadBarrierWait);
+    HANDLER(handlePThreadBarrierDestory);
+    HANDLER(handlePThreadSelf);
+    HANDLER(handleValloc);
+    //@hy
+    HANDLER(handleMakeTaint);
+    HANDLER(handleSendData);
 #undef HANDLER
   };
 } // End klee namespace

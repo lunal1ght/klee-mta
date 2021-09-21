@@ -64,8 +64,11 @@ namespace klee {
 
     Node *node;
     ImmutableTree(Node *_node);
-  };
 
+public:
+    void dump() const;
+    void dump(Node *n) const;
+  };
   /***/
 
   template<class K, class V, class KOV, class CMP>

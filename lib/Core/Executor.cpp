@@ -67,17 +67,31 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #if LLVM_VERSION_CODE >= LLVM_VERSION(10, 0)
 #include "llvm/Support/TypeSize.h"
 #else
 typedef unsigned TypeSize;
 #endif
 #include "llvm/Support/raw_ostream.h"
+
+#include "../Encode/Event.h"
+#include "../Encode/Prefix.h"
+#include "../Encode/RuntimeDataManager.h"
+#include "../Encode/Trace.h"
+#include "../Encode/Transfer.h"
+#include "../Thread/MutexManager.h"
+#include "../Thread/StackFrame.h"
+#include "../Thread/Thread.h"
+#include "../Thread/ThreadScheduler.h"
+#include "CallPathManager.h"
 
 #include <algorithm>
 #include <cassert>
@@ -579,6 +593,7 @@ Executor::~Executor() {
   delete specialFunctionHandler;
   delete statsTracker;
   delete solver;
+  delete listenerService;
 }
 
 /***/
@@ -970,7 +985,7 @@ Executor::fork(ExecutionState &current, ref<Expr> condition, bool isInternal) {
        MaxStaticCPForkPct!=1. || MaxStaticCPSolvePct != 1.) &&
       statsTracker->elapsed() > time::seconds(60)) {
     StatisticManager &sm = *theStatisticManager;
-    CallPathNode *cpn = current.stack.back().callPathNode;
+    CallPathNode *cpn = current.currentStack->realStack.back().callPathNode;
     if ((MaxStaticForkPct<1. &&
          sm.getIndexedValue(stats::forks, sm.getIndex()) > 
          stats::forks*MaxStaticForkPct) ||
@@ -1001,7 +1016,7 @@ Executor::fork(ExecutionState &current, ref<Expr> condition, bool isInternal) {
                                   current.queryMetaData);
   solver->setTimeout(time::Span());
   if (!success) {
-    current.pc = current.prevPC;
+    current.currentThread->pc = current.currentThread->prevPC;
     terminateStateEarly(current, "Query timed out (fork).");
     return StatePair(0, 0);
   }
@@ -1209,23 +1224,53 @@ void Executor::addConstraint(ExecutionState &state, ref<Expr> condition) {
                                  ConstantExpr::alloc(1, Expr::Bool));
 }
 
-const Cell& Executor::eval(KInstruction *ki, unsigned index, 
-                           ExecutionState &state) const {
-  assert(index < ki->inst->getNumOperands());
-  int vnumber = ki->operands[index];
+const Cell& Executor::eval(KInstruction *ki, unsigned index, ExecutionState &state) const {
+	assert(index < ki->inst->getNumOperands());
+	int vnumber = ki->operands[index];
+	assert(vnumber != -1 && "Invalid operand to eval(), not a value or constant!");
 
-  assert(vnumber != -1 &&
-         "Invalid operand to eval(), not a value or constant!");
+	// Determine if this is a constant or not.
+	if (vnumber < 0) {
+		unsigned index = -vnumber - 2;
+		return kmodule->constantTable[index];
+	} else {
+		unsigned index = vnumber;
+		StackFrame &sf = state.currentStack->realStack.back();
+		return sf.locals[index];
+	}
+}
 
-  // Determine if this is a constant or not.
-  if (vnumber < 0) {
-    unsigned index = -vnumber - 2;
-    return kmodule->constantTable[index];
-  } else {
-    unsigned index = vnumber;
-    StackFrame &sf = state.stack.back();
-    return sf.locals[index];
-  }
+const Cell& Executor::evalCurrent(KInstruction *ki, unsigned index, ExecutionState &state) const {
+	assert(index < ki->inst->getNumOperands());
+	int vnumber = ki->operands[index];
+	assert(vnumber != -1 && "Invalid operand to eval(), not a value or constant!");
+
+	// Determine if this is a constant or not.
+	if (vnumber < 0) {
+		unsigned index = -vnumber - 2;
+		return kmodule->constantTable[index];
+	} else {
+		unsigned index = vnumber;
+		StackFrame &sf = state.currentThread->stack->realStack.back();
+		return sf.locals[index];
+	}
+}
+
+void Executor::ineval(KInstruction *ki, unsigned index, ExecutionState &state, ref<Expr> value) const {
+	assert(index < ki->inst->getNumOperands());
+	int vnumber = ki->operands[index];
+
+	assert(vnumber != -1 && "Invalid operand to eval(), not a value or constant!");
+
+	// Determine if this is a constant or not.
+	if (vnumber < 0) {
+		unsigned index = -vnumber - 2;
+		kmodule->constantTable[index].value = value;
+	} else {
+		unsigned index = vnumber;
+		StackFrame &sf = state.currentStack->realStack.back();
+		sf.locals[index].value = value;
+	}
 }
 
 void Executor::bindLocal(KInstruction *target, ExecutionState &state, 
@@ -1281,8 +1326,8 @@ Executor::toConstant(ExecutionState &state,
   std::string str;
   llvm::raw_string_ostream os(str);
   os << "silently concretizing (reason: " << reason << ") expression " << e
-     << " to value " << value << " (" << (*(state.pc)).info->file << ":"
-     << (*(state.pc)).info->line << ")";
+     << " to value " << value << " (" << (*(state.currentThread->pc)).info->file << ":"
+     << (*(state.currentThread->pc)).info->line << ")";
 
   if (AllExternalWarnings)
     klee_warning("%s", os.str().c_str());
@@ -1361,14 +1406,14 @@ void Executor::printDebugInstructions(ExecutionState &state) {
   //   [src]     src location:asm line:state ID
   if (!DebugPrintInstructions.isSet(STDERR_COMPACT) &&
       !DebugPrintInstructions.isSet(FILE_COMPACT)) {
-    (*stream) << "     " << state.pc->getSourceLocation() << ':';
+    (*stream) << "     " << state.currentThread->pc->getSourceLocation() << ':';
   }
 
-  (*stream) << state.pc->info->assemblyLine << ':' << state.getID();
+  (*stream) << state.currentThread->pc->info->assemblyLine << ':' << state.getID();
 
   if (DebugPrintInstructions.isSet(STDERR_ALL) ||
       DebugPrintInstructions.isSet(FILE_ALL))
-    (*stream) << ':' << *(state.pc->inst);
+    (*stream) << ':' << *(state.currentThread->pc->inst);
 
   (*stream) << '\n';
 
@@ -1389,8 +1434,8 @@ void Executor::stepInstruction(ExecutionState &state) {
 
   ++stats::instructions;
   ++state.steppedInstructions;
-  state.prevPC = state.pc;
-  ++state.pc;
+  state.currentThread->prevPC = state.currentThread->pc;
+  ++state.currentThread->pc;
 
   if (stats::instructions == MaxInstructions)
     haltExecution = true;
@@ -1537,7 +1582,7 @@ void Executor::unwindToNextLandingpad(ExecutionState &state) {
     lowestStackIndex = 0;
     popFrames = false;
   } else if (auto *cui = dyn_cast<CleanupPhaseUnwindingInformation>(ui)) {
-    startIndex = state.stack.size() - 1;
+    startIndex = state.currentStack->realStack.size() - 1;
     lowestStackIndex = cui->catchingStackIndex;
     popFrames = true;
   } else {
@@ -1545,12 +1590,12 @@ void Executor::unwindToNextLandingpad(ExecutionState &state) {
   }
 
   for (std::size_t i = startIndex; i > lowestStackIndex; i--) {
-    auto const &sf = state.stack.at(i);
+    auto const &sf = state.currentStack->realStack.at(i);
 
     Instruction *inst = sf.caller ? sf.caller->inst : nullptr;
 
     if (popFrames) {
-      state.popFrame();
+      state.currentStack->popFrame();
       if (statsTracker != nullptr) {
         statsTracker->framePopped(state);
       }
@@ -1591,15 +1636,15 @@ void Executor::unwindToNextLandingpad(ExecutionState &state) {
             kmodule->module->getFunction("_klee_eh_cxx_personality");
         KFunction *kf = kmodule->functionMap[personality_fn];
 
-        state.pushFrame(state.prevPC, kf);
-        state.pc = kf->instructions;
+        state.currentStack->pushFrame(state.currentThread->prevPC, kf);
+        state.currentThread->pc = kf->instructions;
         bindArgument(kf, 0, state, sui->exceptionObject);
         bindArgument(kf, 1, state, clauses_mo->getSizeExpr());
         bindArgument(kf, 2, state, clauses_mo->getBaseExpr());
 
         if (statsTracker) {
           statsTracker->framePushed(state,
-                                    &state.stack[state.stack.size() - 2]);
+                                    &state.currentStack->realStack[state.currentStack->realStack.size() - 2]);
         }
 
         // make sure we remember our search progress afterwards
@@ -1705,7 +1750,7 @@ void Executor::executeCall(ExecutionState &state, KInstruction *ki, Function *f,
     // va_arg is handled by caller and intrinsic lowering, see comment for
     // ExecutionState::varargs
     case Intrinsic::vastart: {
-      StackFrame &sf = state.stack.back();
+      StackFrame &sf = state.currentStack->realStack.back();
 
       // varargs can be zero if no varargs were provided
       if (!sf.varargs)
@@ -1778,7 +1823,7 @@ void Executor::executeCall(ExecutionState &state, KInstruction *ki, Function *f,
   } else {
     // Check if maximum stack size was reached.
     // We currently only count the number of stack frames
-    if (RuntimeMaxStackFrames && state.stack.size() > RuntimeMaxStackFrames) {
+    if (RuntimeMaxStackFrames && state.currentStack->realStack.size() > RuntimeMaxStackFrames) {
       terminateStateEarly(state, "Maximum stack size reached.");
       klee_warning("Maximum stack size reached.");
       return;
@@ -1790,11 +1835,11 @@ void Executor::executeCall(ExecutionState &state, KInstruction *ki, Function *f,
     // from just an instruction (unlike LLVM).
     KFunction *kf = kmodule->functionMap[f];
 
-    state.pushFrame(state.prevPC, kf);
-    state.pc = kf->instructions;
+    state.currentStack->pushFrame(state.currentThread->prevPC, kf);
+    state.currentThread->pc = kf->instructions;
 
     if (statsTracker)
-      statsTracker->framePushed(state, &state.stack[state.stack.size() - 2]);
+      statsTracker->framePushed(state, &state.currentStack->realStack[state.currentStack->realStack.size() - 2]);
 
     // TODO: support zeroext, signext, sret attributes
 
@@ -1898,9 +1943,9 @@ void Executor::executeCall(ExecutionState &state, KInstruction *ki, Function *f,
         }
       }
 
-      StackFrame &sf = state.stack.back();
+      StackFrame &sf = state.currentStack->realStack.back();
       MemoryObject *mo = sf.varargs =
-          memory->allocate(size, true, false, state.prevPC->inst,
+          memory->allocate(size, true, false, state.currentThread->prevPC->inst,
                            (requires16ByteAlignment ? 16 : 8));
       if (!mo && size) {
         terminateStateOnExecError(state, "out of memory (varargs)");
@@ -1956,12 +2001,12 @@ void Executor::transferToBasicBlock(BasicBlock *dst, BasicBlock *src,
   // instructions know which argument to eval, set the pc, and continue.
   
   // XXX this lookup has to go ?
-  KFunction *kf = state.stack.back().kf;
+  KFunction *kf = state.currentStack->realStack.back().kf;
   unsigned entry = kf->basicBlockEntry[dst];
-  state.pc = &kf->instructions[entry];
-  if (state.pc->inst->getOpcode() == Instruction::PHI) {
-    PHINode *first = static_cast<PHINode*>(state.pc->inst);
-    state.incomingBBIndex = first->getBasicBlockIndex(src);
+  state.currentThread->pc = &kf->instructions[entry];
+  if (state.currentThread->pc->inst->getOpcode() == Instruction::PHI) {
+    PHINode *first = static_cast<PHINode*>(state.currentThread->pc->inst);
+    state.currentThread->incomingBBIndex = first->getBasicBlockIndex(src);
   }
 }
 
@@ -2001,7 +2046,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     // Control flow
   case Instruction::Ret: {
     ReturnInst *ri = cast<ReturnInst>(i);
-    KInstIterator kcaller = state.stack.back().caller;
+    KInstIterator kcaller = state.currentStack->realStack.back().caller;
     Instruction *caller = kcaller ? kcaller->inst : 0;
     bool isVoidReturn = (ri->getNumOperands() == 0);
     ref<Expr> result = ConstantExpr::alloc(0, Expr::Bool);
@@ -2010,11 +2055,11 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       result = eval(ki, 0, state).value;
     }
     
-    if (state.stack.size() <= 1) {
+    if (state.currentStack->realStack.size() <= 1) {
       assert(!caller && "caller set on initial stack frame");
       terminateStateOnExit(state);
     } else {
-      state.popFrame();
+      state.currentStack->popFrame();
 
       if (statsTracker)
         statsTracker->framePopped(state);
@@ -2022,8 +2067,8 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       if (InvokeInst *ii = dyn_cast<InvokeInst>(caller)) {
         transferToBasicBlock(ii->getNormalDest(), caller->getParent(), state);
       } else {
-        state.pc = kcaller;
-        ++state.pc;
+        state.currentThread->pc = kcaller;
+        ++state.currentThread->pc;
       }
 
       if (ri->getFunction()->getName() == "_klee_eh_cxx_personality") {
@@ -2119,7 +2164,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
       // requires that we still be in the context of the branch
       // instruction (it reuses its statistic id). Should be cleaned
       // up with convenient instruction specific data.
-      if (statsTracker && state.stack.back().kf->trackCoverage)
+      if (statsTracker && state.currentStack->realStack.back().kf->trackCoverage)
         statsTracker->markBranchVisited(branches.first, branches.second);
 
       if (branches.first)
@@ -2448,7 +2493,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     break;
   }
   case Instruction::PHI: {
-    ref<Expr> result = eval(ki, state.incomingBBIndex, state).value;
+    ref<Expr> result = eval(ki, state.currentThread->incomingBBIndex, state).value;
     bindLocal(ki, state, result);
     break;
   }
@@ -2773,109 +2818,247 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
 #endif
 
   case Instruction::FAdd: {
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FAdd operation");
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FAdd operation");
 
-    llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
-    Res.add(APFloat(*fpWidthToSemantics(right->getWidth()),right->getAPValue()), APFloat::rmNearestTiesToEven);
-    bindLocal(ki, state, ConstantExpr::alloc(Res.bitcastToAPInt()));
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
+                        left->getAPValue());
+      Res.add(
+          APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()),
+          APFloat::rmNearestTiesToEven);
+#else
+      llvm::APFloat Res(left->getAPValue());
+      Res.add(APFloat(right->getAPValue()), APFloat::rmNearestTiesToEven);
+#endif
+      ref<Expr> result = ConstantExpr::alloc(Res.bitcastToAPInt());
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> res = AddExpr::create(originLeft, originRight);
+      res->isFloat = true;
+      bindLocal(ki, state, res);
+    }
     break;
   }
 
   case Instruction::FSub: {
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FSub operation");
-    llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
-    Res.subtract(APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()), APFloat::rmNearestTiesToEven);
-    bindLocal(ki, state, ConstantExpr::alloc(Res.bitcastToAPInt()));
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
+
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FSub operation");
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
+                        left->getAPValue());
+      Res.subtract(
+          APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()),
+          APFloat::rmNearestTiesToEven);
+#else
+      llvm::APFloat Res(left->getAPValue());
+      Res.subtract(APFloat(right->getAPValue()), APFloat::rmNearestTiesToEven);
+#endif
+      ref<Expr> result = ConstantExpr::alloc(Res.bitcastToAPInt());
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      originLeft->isFloat = true;
+      originRight->isFloat = true;
+      ref<Expr> res = SubExpr::create(originLeft, originRight);
+      res->isFloat = true;
+      bindLocal(ki, state, res);
+    }
     break;
   }
 
   case Instruction::FMul: {
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FMul operation");
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
 
-    llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
-    Res.multiply(APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()), APFloat::rmNearestTiesToEven);
-    bindLocal(ki, state, ConstantExpr::alloc(Res.bitcastToAPInt()));
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FMul operation");
+
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
+                        left->getAPValue());
+      Res.multiply(
+          APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()),
+          APFloat::rmNearestTiesToEven);
+#else
+      llvm::APFloat Res(left->getAPValue());
+      Res.multiply(APFloat(right->getAPValue()), APFloat::rmNearestTiesToEven);
+#endif
+      ref<Expr> result = ConstantExpr::alloc(Res.bitcastToAPInt());
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      originLeft->isFloat = true;
+      originRight->isFloat = true;
+      ref<Expr> res = MulExpr::create(originLeft, originRight);
+      res->isFloat = true;
+      bindLocal(ki, state, res);
+    }
     break;
   }
 
   case Instruction::FDiv: {
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FDiv operation");
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
 
-    llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
-    Res.divide(APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()), APFloat::rmNearestTiesToEven);
-    bindLocal(ki, state, ConstantExpr::alloc(Res.bitcastToAPInt()));
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FDiv operation");
+
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
+                        left->getAPValue());
+      Res.divide(
+          APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()),
+          APFloat::rmNearestTiesToEven);
+#else
+      llvm::APFloat Res(left->getAPValue());
+      Res.divide(APFloat(right->getAPValue()), APFloat::rmNearestTiesToEven);
+#endif
+      ref<Expr> result = ConstantExpr::alloc(Res.bitcastToAPInt());
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      originLeft->isFloat = true;
+      originRight->isFloat = true;
+      ref<Expr> result = SDivExpr::create(originLeft, originRight);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
 
   case Instruction::FRem: {
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FRem operation");
-    llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
-    Res.mod(
-        APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()));
-    bindLocal(ki, state, ConstantExpr::alloc(Res.bitcastToAPInt()));
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
+
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FRem operation");
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
+                        left->getAPValue());
+      Res.remainder(
+          APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()));
+#else
+      llvm::APFloat Res(left->getAPValue());
+      Res.mod(APFloat(right->getAPValue()), APFloat::rmNearestTiesToEven);
+#endif
+      ref<Expr> result = ConstantExpr::alloc(Res.bitcastToAPInt());
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> result = SRemExpr::create(originLeft, originRight);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
 
   case Instruction::FPTrunc: {
     FPTruncInst *fi = cast<FPTruncInst>(i);
-    Expr::Width resultType = getWidthForLLVMType(fi->getType());
-    ref<ConstantExpr> arg = toConstant(state, eval(ki, 0, state).value,
-                                       "floating point");
-    if (!fpWidthToSemantics(arg->getWidth()) || resultType > arg->getWidth())
-      return terminateStateOnExecError(state, "Unsupported FPTrunc operation");
+    ref<Expr> srcExpr = eval(ki, 0, state).value;
+    ConstantExpr *srcCons = dyn_cast<ConstantExpr>(srcExpr);
+    if (srcCons != NULL) {
+      Expr::Width resultType = getWidthForLLVMType(fi->getType());
+      ref<ConstantExpr> arg =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      if (!fpWidthToSemantics(arg->getWidth()) || resultType > arg->getWidth())
+        return terminateStateOnExecError(state,
+                                         "Unsupported FPTrunc operation");
 
-    llvm::APFloat Res(*fpWidthToSemantics(arg->getWidth()), arg->getAPValue());
-    bool losesInfo = false;
-    Res.convert(*fpWidthToSemantics(resultType),
-                llvm::APFloat::rmNearestTiesToEven,
-                &losesInfo);
-    bindLocal(ki, state, ConstantExpr::alloc(Res));
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(arg->getWidth()),
+                        arg->getAPValue());
+#else
+      llvm::APFloat Res(arg->getAPValue());
+#endif
+      bool losesInfo = false;
+      Res.convert(*fpWidthToSemantics(resultType),
+                  llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+      ref<Expr> result = ConstantExpr::alloc(Res);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> result = ExtractExpr::create(
+          eval(ki, 0, state).value, 0, getWidthForLLVMType(fi->getType()));
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
-
   case Instruction::FPExt: {
     FPExtInst *fi = cast<FPExtInst>(i);
-    Expr::Width resultType = getWidthForLLVMType(fi->getType());
-    ref<ConstantExpr> arg = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    if (!fpWidthToSemantics(arg->getWidth()) || arg->getWidth() > resultType)
-      return terminateStateOnExecError(state, "Unsupported FPExt operation");
-    llvm::APFloat Res(*fpWidthToSemantics(arg->getWidth()), arg->getAPValue());
-    bool losesInfo = false;
-    Res.convert(*fpWidthToSemantics(resultType),
-                llvm::APFloat::rmNearestTiesToEven,
-                &losesInfo);
-    bindLocal(ki, state, ConstantExpr::alloc(Res));
+    ref<Expr> srcExpr = eval(ki, 0, state).value;
+    ConstantExpr *srcCons = dyn_cast<ConstantExpr>(srcExpr);
+    if (srcCons != NULL) {
+      Expr::Width resultType = getWidthForLLVMType(fi->getType());
+      ref<ConstantExpr> arg =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      if (!fpWidthToSemantics(arg->getWidth()) || arg->getWidth() > resultType)
+        return terminateStateOnExecError(state, "Unsupported FPExt operation");
+#if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
+      llvm::APFloat Res(*fpWidthToSemantics(arg->getWidth()),
+                        arg->getAPValue());
+#else
+      llvm::APFloat Res(arg->getAPValue());
+#endif
+      bool losesInfo = false;
+      Res.convert(*fpWidthToSemantics(resultType),
+                  llvm::APFloat::rmNearestTiesToEven, &losesInfo);
+      ref<Expr> result = ConstantExpr::alloc(Res);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> result = SExtExpr::create(eval(ki, 0, state).value,
+                                          getWidthForLLVMType(fi->getType()));
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
 
@@ -2925,117 +3108,215 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
 
   case Instruction::UIToFP: {
     UIToFPInst *fi = cast<UIToFPInst>(i);
-    Expr::Width resultType = getWidthForLLVMType(fi->getType());
-    ref<ConstantExpr> arg = toConstant(state, eval(ki, 0, state).value,
-                                       "floating point");
-    const llvm::fltSemantics *semantics = fpWidthToSemantics(resultType);
-    if (!semantics)
-      return terminateStateOnExecError(state, "Unsupported UIToFP operation");
-    llvm::APFloat f(*semantics, 0);
-    f.convertFromAPInt(arg->getAPValue(), false,
-                       llvm::APFloat::rmNearestTiesToEven);
+    ref<Expr> srcExpr = eval(ki, 0, state).value;
+    ConstantExpr *srcCons = dyn_cast<ConstantExpr>(srcExpr);
+    if (srcCons != NULL) {
+      Expr::Width resultType = getWidthForLLVMType(fi->getType());
+      ref<ConstantExpr> arg =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      const llvm::fltSemantics *semantics = fpWidthToSemantics(resultType);
+      if (!semantics)
+        return terminateStateOnExecError(state, "Unsupported UIToFP operation");
+      llvm::APFloat f(*semantics, 0);
+      f.convertFromAPInt(arg->getAPValue(), false,
+                         llvm::APFloat::rmNearestTiesToEven);
 
-    bindLocal(ki, state, ConstantExpr::alloc(f));
+      ref<Expr> result = ConstantExpr::alloc(f);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> result = SExtExpr::alloc(eval(ki, 0, state).value,
+                                         getWidthForLLVMType(fi->getType()));
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
 
   case Instruction::SIToFP: {
     SIToFPInst *fi = cast<SIToFPInst>(i);
-    Expr::Width resultType = getWidthForLLVMType(fi->getType());
-    ref<ConstantExpr> arg = toConstant(state, eval(ki, 0, state).value,
-                                       "floating point");
-    const llvm::fltSemantics *semantics = fpWidthToSemantics(resultType);
-    if (!semantics)
-      return terminateStateOnExecError(state, "Unsupported SIToFP operation");
-    llvm::APFloat f(*semantics, 0);
-    f.convertFromAPInt(arg->getAPValue(), true,
-                       llvm::APFloat::rmNearestTiesToEven);
 
-    bindLocal(ki, state, ConstantExpr::alloc(f));
+    ref<Expr> srcExpr = eval(ki, 0, state).value;
+    ConstantExpr *srcCons = dyn_cast<ConstantExpr>(srcExpr);
+    if (srcCons != NULL) {
+      Expr::Width resultType = getWidthForLLVMType(fi->getType());
+      ref<ConstantExpr> arg =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      const llvm::fltSemantics *semantics = fpWidthToSemantics(resultType);
+      if (!semantics)
+        return terminateStateOnExecError(state, "Unsupported SIToFP operation");
+      llvm::APFloat f(*semantics, 0);
+      f.convertFromAPInt(arg->getAPValue(), true,
+                         llvm::APFloat::rmNearestTiesToEven);
+
+      ref<Expr> result = ConstantExpr::alloc(f);
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    } else {
+      ref<Expr> result = SExtExpr::alloc(eval(ki, 0, state).value,
+                                         getWidthForLLVMType(fi->getType()));
+      result->isFloat = true;
+      bindLocal(ki, state, result);
+    }
     break;
   }
 
   case Instruction::FCmp: {
     FCmpInst *fi = cast<FCmpInst>(i);
-    ref<ConstantExpr> left = toConstant(state, eval(ki, 0, state).value,
-                                        "floating point");
-    ref<ConstantExpr> right = toConstant(state, eval(ki, 1, state).value,
-                                         "floating point");
-    if (!fpWidthToSemantics(left->getWidth()) ||
-        !fpWidthToSemantics(right->getWidth()))
-      return terminateStateOnExecError(state, "Unsupported FCmp operation");
+    ref<Expr> originLeft = eval(ki, 0, state).value;
+    ref<Expr> originRight = eval(ki, 1, state).value;
+    ConstantExpr *leftCE = dyn_cast<ConstantExpr>(originLeft);
+    ConstantExpr *rightCE = dyn_cast<ConstantExpr>(originRight);
+    if (leftCE != NULL && rightCE != NULL) {
+      ref<ConstantExpr> left =
+          toConstant(state, eval(ki, 0, state).value, "floating point");
+      ref<ConstantExpr> right =
+          toConstant(state, eval(ki, 1, state).value, "floating point");
+      if (!fpWidthToSemantics(left->getWidth()) ||
+          !fpWidthToSemantics(right->getWidth()))
+        return terminateStateOnExecError(state, "Unsupported FCmp operation");
 
-    APFloat LHS(*fpWidthToSemantics(left->getWidth()),left->getAPValue());
-    APFloat RHS(*fpWidthToSemantics(right->getWidth()),right->getAPValue());
-    APFloat::cmpResult CmpRes = LHS.compare(RHS);
+      APFloat LHS(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
+      APFloat RHS(*fpWidthToSemantics(right->getWidth()), right->getAPValue());
+      APFloat::cmpResult CmpRes = LHS.compare(RHS);
 
-    bool Result = false;
-    switch( fi->getPredicate() ) {
-      // Predicates which only care about whether or not the operands are NaNs.
-    case FCmpInst::FCMP_ORD:
-      Result = (CmpRes != APFloat::cmpUnordered);
-      break;
+      bool Result = false;
+      switch (fi->getPredicate()) {
+        // Predicates which only care about whether or not the operands are
+        // NaNs.
+      case FCmpInst::FCMP_ORD:
+        Result = (CmpRes != APFloat::cmpUnordered);
+        break;
 
-    case FCmpInst::FCMP_UNO:
-      Result = (CmpRes == APFloat::cmpUnordered);
-      break;
+      case FCmpInst::FCMP_UNO:
+        Result = (CmpRes == APFloat::cmpUnordered);
+        break;
 
-      // Ordered comparisons return false if either operand is NaN.  Unordered
-      // comparisons return true if either operand is NaN.
-    case FCmpInst::FCMP_UEQ:
-      Result = (CmpRes == APFloat::cmpUnordered || CmpRes == APFloat::cmpEqual);
-      break;
-    case FCmpInst::FCMP_OEQ:
-      Result = (CmpRes != APFloat::cmpUnordered && CmpRes == APFloat::cmpEqual);
-      break;
+        // Ordered comparisons return false if either operand is NaN.  Unordered
+        // comparisons return true if either operand is NaN.
+      case FCmpInst::FCMP_UEQ:
+        Result =
+            (CmpRes == APFloat::cmpUnordered || CmpRes == APFloat::cmpEqual);
+        break;
+      case FCmpInst::FCMP_OEQ:
+        Result =
+            (CmpRes != APFloat::cmpUnordered && CmpRes == APFloat::cmpEqual);
+        break;
 
-    case FCmpInst::FCMP_UGT:
-      Result = (CmpRes == APFloat::cmpUnordered || CmpRes == APFloat::cmpGreaterThan);
-      break;
-    case FCmpInst::FCMP_OGT:
-      Result = (CmpRes != APFloat::cmpUnordered && CmpRes == APFloat::cmpGreaterThan);
-      break;
+      case FCmpInst::FCMP_UGT:
+        Result = (CmpRes == APFloat::cmpUnordered ||
+                  CmpRes == APFloat::cmpGreaterThan);
+        break;
+      case FCmpInst::FCMP_OGT:
+        Result = (CmpRes != APFloat::cmpUnordered &&
+                  CmpRes == APFloat::cmpGreaterThan);
+        break;
 
-    case FCmpInst::FCMP_UGE:
-      Result = (CmpRes == APFloat::cmpUnordered || (CmpRes == APFloat::cmpGreaterThan || CmpRes == APFloat::cmpEqual));
-      break;
-    case FCmpInst::FCMP_OGE:
-      Result = (CmpRes != APFloat::cmpUnordered && (CmpRes == APFloat::cmpGreaterThan || CmpRes == APFloat::cmpEqual));
-      break;
+      case FCmpInst::FCMP_UGE:
+        Result = (CmpRes == APFloat::cmpUnordered ||
+                  (CmpRes == APFloat::cmpGreaterThan ||
+                   CmpRes == APFloat::cmpEqual));
+        break;
+      case FCmpInst::FCMP_OGE:
+        Result = (CmpRes != APFloat::cmpUnordered &&
+                  (CmpRes == APFloat::cmpGreaterThan ||
+                   CmpRes == APFloat::cmpEqual));
+        break;
 
-    case FCmpInst::FCMP_ULT:
-      Result = (CmpRes == APFloat::cmpUnordered || CmpRes == APFloat::cmpLessThan);
-      break;
-    case FCmpInst::FCMP_OLT:
-      Result = (CmpRes != APFloat::cmpUnordered && CmpRes == APFloat::cmpLessThan);
-      break;
+      case FCmpInst::FCMP_ULT:
+        Result =
+            (CmpRes == APFloat::cmpUnordered || CmpRes == APFloat::cmpLessThan);
+        break;
+      case FCmpInst::FCMP_OLT:
+        Result =
+            (CmpRes != APFloat::cmpUnordered && CmpRes == APFloat::cmpLessThan);
+        break;
 
-    case FCmpInst::FCMP_ULE:
-      Result = (CmpRes == APFloat::cmpUnordered || (CmpRes == APFloat::cmpLessThan || CmpRes == APFloat::cmpEqual));
-      break;
-    case FCmpInst::FCMP_OLE:
-      Result = (CmpRes != APFloat::cmpUnordered && (CmpRes == APFloat::cmpLessThan || CmpRes == APFloat::cmpEqual));
-      break;
+      case FCmpInst::FCMP_ULE:
+        Result =
+            (CmpRes == APFloat::cmpUnordered ||
+             (CmpRes == APFloat::cmpLessThan || CmpRes == APFloat::cmpEqual));
+        break;
+      case FCmpInst::FCMP_OLE:
+        Result =
+            (CmpRes != APFloat::cmpUnordered &&
+             (CmpRes == APFloat::cmpLessThan || CmpRes == APFloat::cmpEqual));
+        break;
 
-    case FCmpInst::FCMP_UNE:
-      Result = (CmpRes == APFloat::cmpUnordered || CmpRes != APFloat::cmpEqual);
-      break;
-    case FCmpInst::FCMP_ONE:
-      Result = (CmpRes != APFloat::cmpUnordered && CmpRes != APFloat::cmpEqual);
-      break;
+      case FCmpInst::FCMP_UNE:
+        Result =
+            (CmpRes == APFloat::cmpUnordered || CmpRes != APFloat::cmpEqual);
+        break;
+      case FCmpInst::FCMP_ONE:
+        Result =
+            (CmpRes != APFloat::cmpUnordered && CmpRes != APFloat::cmpEqual);
+        break;
 
-    default:
-      assert(0 && "Invalid FCMP predicate!");
-      break;
-    case FCmpInst::FCMP_FALSE:
-      Result = false;
-      break;
-    case FCmpInst::FCMP_TRUE:
-      Result = true;
-      break;
+      default:
+        assert(0 && "Invalid FCMP predicate!");
+        break;
+      case FCmpInst::FCMP_FALSE:
+        Result = false;
+        break;
+      case FCmpInst::FCMP_TRUE:
+        Result = true;
+        break;
+      }
+
+      bindLocal(ki, state, ConstantExpr::alloc(Result, Expr::Bool));
+    } else {
+      switch (fi->getPredicate()) {
+      case FCmpInst::FCMP_ORD:
+        break;
+      case FCmpInst::FCMP_UNO:
+        break;
+      case FCmpInst::FCMP_UEQ:
+        bindLocal(ki, state, EqExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_OEQ:
+        bindLocal(ki, state, EqExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_UGT:
+        bindLocal(ki, state, SltExpr::alloc(originRight, originLeft));
+        break;
+      case FCmpInst::FCMP_OGT:
+        bindLocal(ki, state, SltExpr::alloc(originRight, originLeft));
+        break;
+      case FCmpInst::FCMP_UGE:
+        bindLocal(ki, state, SleExpr::alloc(originRight, originLeft));
+        break;
+      case FCmpInst::FCMP_OGE:
+        bindLocal(ki, state, SleExpr::alloc(originRight, originLeft));
+        break;
+      case FCmpInst::FCMP_ULT:
+        bindLocal(ki, state, SltExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_OLT:
+        bindLocal(ki, state, SltExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_ULE:
+        bindLocal(ki, state, SleExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_OLE:
+        bindLocal(ki, state, SleExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_UNE:
+        bindLocal(ki, state, NeExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_ONE:
+        bindLocal(ki, state, NeExpr::alloc(originLeft, originRight));
+        break;
+      case FCmpInst::FCMP_FALSE:
+        bindLocal(ki, state, ConstantExpr::alloc(0, 1));
+        break;
+      case FCmpInst::FCMP_TRUE:
+        bindLocal(ki, state, ConstantExpr::alloc(1, 1));
+        break;
+      default:
+        assert(0 && "Invalid FCMP predicate!");
+        break;
+      }
     }
-
-    bindLocal(ki, state, ConstantExpr::alloc(Result, Expr::Bool));
     break;
   }
   case Instruction::InsertValue: {
@@ -3203,7 +3484,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     ref<ConstantExpr> selectorValue;
 
     // check on which frame we are currently
-    if (state.stack.size() - 1 == cui->catchingStackIndex) {
+    if (state.currentStack->realStack.size() - 1 == cui->catchingStackIndex) {
       // we are in the target stack frame, return the selector value
       // that was returned by the personality fn in phase 1 and stop unwinding.
       selectorValue = cui->selectorValue;
@@ -3338,10 +3619,14 @@ void Executor::bindInstructionConstants(KInstruction *KI) {
 }
 
 void Executor::bindModuleConstants() {
-  for (auto &kfp : kmodule->functions) {
-    KFunction *kf = kfp.get();
-    for (unsigned i=0; i<kf->numInstructions; ++i)
-      bindInstructionConstants(kf->instructions[i]);
+  // avoid multiple assignment of getElementPtr's indices
+  // add by ylc
+  if (!hasInitialized) {
+    for (auto &kfp : kmodule->functions) {
+      KFunction *kf = kfp.get();
+      for (unsigned i = 0; i < kf->numInstructions; ++i)
+        bindInstructionConstants(kf->instructions[i]);
+    }
   }
 
   kmodule->constantTable =
@@ -3407,19 +3692,21 @@ void Executor::doDumpStates() {
 void Executor::run(ExecutionState &initialState) {
   bindModuleConstants();
 
-  // Delay init till now so that ticks don't accrue during optimization and such.
+  // Delay init till now so that ticks don't accrue during optimization and
+  // such.
   timers.reset();
 
   states.insert(&initialState);
 
   if (usingSeeds) {
     std::vector<SeedInfo> &v = seedMap[&initialState];
-    
-    for (std::vector<KTest*>::const_iterator it = usingSeeds->begin(), 
-           ie = usingSeeds->end(); it != ie; ++it)
+
+    for (std::vector<KTest *>::const_iterator it = usingSeeds->begin(),
+                                              ie = usingSeeds->end();
+         it != ie; ++it)
       v.push_back(SeedInfo(*it));
 
-    int lastNumSeeds = usingSeeds->size()+10;
+    int lastNumSeeds = usingSeeds->size() + 10;
     time::Point lastTime, startTime = lastTime = time::getWallTime();
     ExecutionState *lastState = 0;
     while (!seedMap.empty()) {
@@ -3428,25 +3715,27 @@ void Executor::run(ExecutionState &initialState) {
         return;
       }
 
-      std::map<ExecutionState*, std::vector<SeedInfo> >::iterator it = 
-        seedMap.upper_bound(lastState);
+      std::map<ExecutionState *, std::vector<SeedInfo>>::iterator it =
+          seedMap.upper_bound(lastState);
       if (it == seedMap.end())
         it = seedMap.begin();
       lastState = it->first;
       ExecutionState &state = *lastState;
-      KInstruction *ki = state.pc;
+      KInstruction *ki = state.currentThread->pc;
       stepInstruction(state);
-
       executeInstruction(state, ki);
       timers.invoke();
-      if (::dumpStates) dumpStates();
-      if (::dumpPTree) dumpPTree();
+      if (::dumpStates)
+        dumpStates();
+      if (::dumpPTree)
+        dumpPTree();
       updateStates(&state);
 
       if ((stats::instructions % 1000) == 0) {
         int numSeeds = 0, numStates = 0;
-        for (std::map<ExecutionState*, std::vector<SeedInfo> >::iterator
-               it = seedMap.begin(), ie = seedMap.end();
+        for (std::map<ExecutionState *, std::vector<SeedInfo>>::iterator
+                 it = seedMap.begin(),
+                 ie = seedMap.end();
              it != ie; ++it) {
           numSeeds += it->second.size();
           numStates++;
@@ -3457,17 +3746,17 @@ void Executor::run(ExecutionState &initialState) {
           klee_warning("seed time expired, %d seeds remain over %d states",
                        numSeeds, numStates);
           break;
-        } else if (numSeeds<=lastNumSeeds-10 ||
+        } else if (numSeeds <= lastNumSeeds - 10 ||
                    time - lastTime >= time::seconds(10)) {
           lastTime = time;
-          lastNumSeeds = numSeeds;          
-          klee_message("%d seeds remaining over: %d states", 
-                       numSeeds, numStates);
+          lastNumSeeds = numSeeds;
+          klee_message("%d seeds remaining over: %d states", numSeeds,
+                       numStates);
         }
       }
     }
 
-    klee_message("seeding done (%d states remain)", (int) states.size());
+    klee_message("seeding done (%d states remain)", (int)states.size());
 
     if (OnlySeed) {
       doDumpStates();
@@ -3480,21 +3769,126 @@ void Executor::run(ExecutionState &initialState) {
   std::vector<ExecutionState *> newStates(states.begin(), states.end());
   searcher->update(0, newStates, std::vector<ExecutionState *>());
 
+  handleInitializers(initialState);
+
   // main interpreter loop
   while (!states.empty() && !haltExecution) {
     ExecutionState &state = searcher->selectState();
-    KInstruction *ki = state.pc;
-    stepInstruction(state);
+    Thread *thread = state.getNextThread();
+    bool isAbleToRun = true;
+    switch (thread->threadState) {
+    case Thread::RUNNABLE: {
+      break;
+    }
 
+    case Thread::MUTEX_BLOCKED: {
+      // TODO:　死锁检测可以完善
+      Thread *origin = thread;
+      bool deadlock = false;
+      do {
+        std::string errorMsg;
+        bool isBlocked;
+        if (state.mutexManager.tryToLockForBlockedThread(thread->threadId,
+                                                         isBlocked, errorMsg)) {
+          if (isBlocked) {
+            if (prefix && !prefix->isFinished()) {
+              llvm::errs() << "thread" << thread->threadId << ": "
+                           << thread->pc->info->file << "/"
+                           << thread->pc->info->line << " "
+                           << thread->pc->inst->getOpcodeName() << "\n";
+              // thread->pc->inst->dump();
+              llvm::errs() << "thread state is MUTEX_BLOCKED, try to get lock "
+                              "but failed\n";
+              isAbleToRun = false;
+              break;
+              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but
+              // failed");
+            }
+            state.reSchedule();
+            thread = state.getNextThread();
+            if (thread == origin) {
+              if (deadlock) {
+                llvm::errs() << "perhaps deadlock happen\n";
+                isAbleToRun = false;
+                break;
+                // assert(0 && "perhaps deadlock happen");
+              } else {
+                deadlock = true;
+              }
+            }
+          } else {
+            state.switchThreadToRunnable(thread);
+          }
+        } else {
+          llvm::errs() << errorMsg << "\n";
+          assert(0 && "try to get lock but failed");
+        }
+      } while (!thread->isRunnable());
+
+      break;
+    }
+
+    default: {
+      isAbleToRun = false;
+    }
+    }
+
+    //处理前缀出错以及执行出错
+    if (!isAbleToRun) {
+      // isExecutionSuccess = false;
+      execStatus = RUNTIMEERROR;
+      listenerService->executionFailed(state, state.currentThread->pc);
+      llvm::errs() << "thread unable to run, Id: " << thread->threadId
+                   << " state: " << thread->threadState << "\n";
+      terminateState(state);
+      break;
+    }
+    KInstruction *ki = thread->pc;
+    if (prefix && !prefix->isFinished() && ki != prefix->getCurrentInst()) {
+      llvm::errs() << "thread id : " << thread->threadId << "\n";
+      llvm::errs() << "real : ";
+      ki->inst->print(errs());
+      llvm::errs() << "\n";
+      llvm::errs() << "prefix : ";
+      prefix->getCurrentInst()->inst->print(errs());
+      llvm::errs() << "\n";
+      llvm::errs() << "prefix unmatched\n";
+      execStatus = IGNOREDERROR;
+      terminateState(state);
+      break;
+    }
+    stepInstruction(state);
+    listenerService->beforeExecuteInstruction(this, state, ki);
     executeInstruction(state, ki);
+    listenerService->afterExecuteInstruction(this, state, ki);
+
+    if (prefix) {
+      prefix->increasePosition();
+    }
+    if (execStatus != SUCCESS) {
+      updateStates(&state);
+      break;
+    }
     timers.invoke();
-    if (::dumpStates) dumpStates();
-    if (::dumpPTree) dumpPTree();
+    if (::dumpStates)
+      dumpStates();
+    if (::dumpPTree)
+      dumpPTree();
+
+    if (state.threadScheduler->isSchedulerEmpty()) {
+      if (!state.examineAllThreadFinalState()) {
+        execStatus = RUNTIMEERROR;
+      } else {
+        execStatus = SUCCESS;
+      }
+      terminateState(state);
+    }
 
     updateStates(&state);
 
     if (!checkMemoryUsage()) {
-      // update searchers when states were terminated early due to memory pressure
+      // update searchers when states were terminated early due to memory
+      // pressure
       updateStates(nullptr);
     }
   }
@@ -3527,22 +3921,21 @@ std::string Executor::getAddressInfo(ExecutionState &state,
   }
   
   MemoryObject hack((unsigned) example);    
-  MemoryMap::iterator lower = state.addressSpace.objects.upper_bound(&hack);
+  MemoryMap::iterator lower = state.currentStack->addressSpace->objects.upper_bound(&hack);
   info << "\tnext: ";
-  if (lower==state.addressSpace.objects.end()) {
+  if (lower==state.currentStack->addressSpace->objects.end()) {
     info << "none\n";
   } else {
     const MemoryObject *mo = lower->first;
     std::string alloc_info;
     mo->getAllocInfo(alloc_info);
-    info << "object at " << mo->address
-         << " of size " << mo->size << "\n"
+    info << "object at " << mo->address << " of size " << mo->size << "\n"
          << "\t\t" << alloc_info << "\n";
   }
-  if (lower!=state.addressSpace.objects.begin()) {
+  if (lower != state.currentStack->addressSpace->objects.begin()) {
     --lower;
     info << "\tprev: ";
-    if (lower==state.addressSpace.objects.end()) {
+    if (lower == state.currentStack->addressSpace->objects.end()) {
       info << "none\n";
     } else {
       const MemoryObject *mo = lower->first;
@@ -3569,7 +3962,7 @@ void Executor::terminateState(ExecutionState &state) {
   std::vector<ExecutionState *>::iterator it =
       std::find(addedStates.begin(), addedStates.end(), &state);
   if (it==addedStates.end()) {
-    state.pc = state.prevPC;
+    state.currentThread->pc = state.currentThread->prevPC;
 
     removedStates.push_back(&state);
   } else {
@@ -3604,16 +3997,16 @@ const InstructionInfo & Executor::getLastNonKleeInternalInstruction(const Execut
     Instruction ** lastInstruction) {
   // unroll the stack of the applications state and find
   // the last instruction which is not inside a KLEE internal function
-  ExecutionState::stack_ty::const_reverse_iterator it = state.stack.rbegin(),
-      itE = state.stack.rend();
+  ExecutionState::stack_ty::const_reverse_iterator it = state.currentStack->realStack.rbegin(),
+      itE = state.currentStack->realStack.rend();
 
   // don't check beyond the outermost function (i.e. main())
   itE--;
 
   const InstructionInfo * ii = 0;
   if (kmodule->internalFunctions.count(it->kf->function) == 0){
-    ii =  state.prevPC->info;
-    *lastInstruction = state.prevPC->inst;
+    ii =  state.currentThread->prevPC->info;
+    *lastInstruction = state.currentThread->prevPC->inst;
     //  Cannot return yet because even though
     //  it->function is not an internal function it might of
     //  been called from an internal function.
@@ -3637,8 +4030,8 @@ const InstructionInfo & Executor::getLastNonKleeInternalInstruction(const Execut
 
   if (!ii) {
     // something went wrong, play safe and return the current instruction info
-    *lastInstruction = state.prevPC->inst;
-    return *state.prevPC->info;
+    *lastInstruction = state.currentThread->prevPC->inst;
+    return *state.currentThread->prevPC->info;
   }
   return *ii;
 }
@@ -3684,7 +4077,7 @@ void Executor::terminateStateOnError(ExecutionState &state,
           << "State: " << state.getID() << '\n';
     }
     msg << "Stack: \n";
-    state.dumpStack(msg);
+    state.currentThread->dumpStack(msg);
 
     std::string info_str = info.str();
     if (info_str != "")
@@ -3696,12 +4089,15 @@ void Executor::terminateStateOnError(ExecutionState &state,
       suffix_buf += ".err";
       suffix = suffix_buf.c_str();
     }
-
-    interpreterHandler->processTestCase(state, msg.str().c_str(), suffix);
+    //存在问题,暂时处理
+		//add by ylc
+    // interpreterHandler->processTestCase(state, msg.str().c_str(), suffix);
   }
     
   terminateState(state);
-
+  llvm::errs() << "encounter runtime error\n";
+  execStatus = RUNTIMEERROR;
+  listenerService->executionFailed(state, state.currentThread->pc);
   if (shouldExitOn(termReason))
     haltExecution = true;
 }
@@ -3803,7 +4199,7 @@ void Executor::callExternalFunction(ExecutionState &state,
       if (i != arguments.size()-1)
         os << ", ";
     }
-    os << ") at " << state.pc->getSourceLocation();
+    os << ") at " << state.currentThread->pc->getSourceLocation();
     
     if (AllExternalWarnings)
       klee_warning("%s", os.str().c_str());
@@ -3873,14 +4269,14 @@ ObjectState *Executor::bindObjectInState(ExecutionState &state,
                                          bool isLocal,
                                          const Array *array) {
   ObjectState *os = array ? new ObjectState(mo, array) : new ObjectState(mo);
-  state.addressSpace.bindObject(mo, os);
+  state.currentStack->addressSpace->bindObject(mo, os);
 
   // Its possible that multiple bindings of the same mo in the state
   // will put multiple copies on this list, but it doesn't really
   // matter because all we use this list for is to unbind the object
   // on function return.
   if (isLocal)
-    state.stack.back().allocas.push_back(mo);
+    state.currentStack->realStack.back().allocas.push_back(mo);
 
   return os;
 }
@@ -3894,7 +4290,7 @@ void Executor::executeAlloc(ExecutionState &state,
                             size_t allocationAlignment) {
   size = toUnique(state, size);
   if (ConstantExpr *CE = dyn_cast<ConstantExpr>(size)) {
-    const llvm::Value *allocSite = state.prevPC->inst;
+    const llvm::Value *allocSite = state.currentThread->prevPC->inst;
     if (allocationAlignment == 0) {
       allocationAlignment = getAllocationAlignment(allocSite);
     }
@@ -3917,7 +4313,7 @@ void Executor::executeAlloc(ExecutionState &state,
         unsigned count = std::min(reallocFrom->size, os->size);
         for (unsigned i=0; i<count; i++)
           os->write(i, reallocFrom->read8(i));
-        state.addressSpace.unbindObject(reallocFrom->getObject());
+        state.currentStack->addressSpace->unbindObject(reallocFrom->getObject());
       }
     }
   } else {
@@ -4028,7 +4424,7 @@ void Executor::executeFree(ExecutionState &state,
         terminateStateOnError(*it->second, "free of global", Free, NULL,
                               getAddressInfo(*it->second, address));
       } else {
-        it->second->addressSpace.unbindObject(mo);
+        it->second->currentStack->addressSpace->unbindObject(mo);
         if (target)
           bindLocal(target, *it->second, Expr::createPointer(0));
       }
@@ -4043,7 +4439,7 @@ void Executor::resolveExact(ExecutionState &state,
   p = optimizer.optimizeExpr(p, true);
   // XXX we may want to be capping this?
   ResolutionList rl;
-  state.addressSpace.resolve(state, solver, p, rl);
+  state.currentStack->addressSpace->resolve(state, solver, p, rl);
   
   ExecutionState *unbound = &state;
   for (ResolutionList::iterator it = rl.begin(), ie = rl.end(); 
@@ -4088,9 +4484,9 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   ObjectPair op;
   bool success;
   solver->setTimeout(coreSolverTimeout);
-  if (!state.addressSpace.resolveOne(state, solver, address, op, success)) {
+  if (!state.currentStack->addressSpace->resolveOne(state, solver, address, op, success)) {
     address = toConstant(state, address, "resolveOne failure");
-    success = state.addressSpace.resolveOne(cast<ConstantExpr>(address), op);
+    success = state.currentStack->addressSpace->resolveOne(cast<ConstantExpr>(address), op);
   }
   solver->setTimeout(time::Span());
 
@@ -4111,7 +4507,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                                       state.queryMetaData);
     solver->setTimeout(time::Span());
     if (!success) {
-      state.pc = state.prevPC;
+      state.currentThread->pc = state.currentThread->prevPC;
       terminateStateEarly(state, "Query timed out (bounds check).");
       return;
     }
@@ -4145,7 +4541,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
   address = optimizer.optimizeExpr(address, true);
   ResolutionList rl;  
   solver->setTimeout(coreSolverTimeout);
-  bool incomplete = state.addressSpace.resolve(state, solver, address, rl,
+  bool incomplete = state.currentStack->addressSpace->resolve(state, solver, address, rl,
                                                0, coreSolverTimeout);
   solver->setTimeout(time::Span());
   
@@ -4167,7 +4563,7 @@ void Executor::executeMemoryOperation(ExecutionState &state,
           terminateStateOnError(*bound, "memory error: object read only",
                                 ReadOnly);
         } else {
-          ObjectState *wos = bound->addressSpace.getWriteable(mo, os);
+          ObjectState *wos = bound->currentStack->addressSpace->getWriteable(mo, os);
           wos->write(mo->getOffsetExpr(address), value);
         }
       } else {
@@ -4190,6 +4586,16 @@ void Executor::executeMemoryOperation(ExecutionState &state,
                             NULL, getAddressInfo(*unbound, address));
     }
   }
+}
+
+ref<Expr> Executor::readExpr(ExecutionState& state, AddressSpace *addressSpace, ref<Expr> address, Expr::Width size) {
+	ObjectPair op;
+	getMemoryObject(op, state, addressSpace, address);
+	const MemoryObject *mo = op.first;
+	ref<Expr> offset = mo->getOffsetExpr(address);
+	const ObjectState *os = op.second;
+	ref<Expr> result = os->read(offset, size);
+	return result;
 }
 
 void Executor::executeMakeSymbolic(ExecutionState &state, 
@@ -4317,7 +4723,12 @@ void Executor::runFunctionAsMain(Function *f,
     }
   }
 
-  ExecutionState *state = new ExecutionState(kmodule->functionMap[f]);
+  ExecutionState *state;
+	if (prefix) {
+		state = new ExecutionState(kmodule->functionMap[f], prefix);
+	} else {
+		state = new ExecutionState(kmodule->functionMap[f]);
+	}
 
   if (pathWriter) 
     state->pathOS = pathWriter->open();
@@ -4345,7 +4756,7 @@ void Executor::runFunctionAsMain(Function *f,
 
         MemoryObject *arg =
             memory->allocate(len + 1, /*isLocal=*/false, /*isGlobal=*/true,
-                             /*allocSite=*/state->pc->inst, /*alignment=*/8);
+                             /*allocSite=*/state->currentThread->pc->inst, /*alignment=*/8);
         if (!arg)
           klee_error("Could not allocate memory for function arguments");
         ObjectState *os = bindObjectInState(*state, arg, false);
@@ -4359,8 +4770,9 @@ void Executor::runFunctionAsMain(Function *f,
   }
   
   initializeGlobals(*state);
-
   processTree = std::make_unique<PTree>(state);
+  listenerService->beforeRunMethodAsMain(this, *state, f, argvMO, arguments, argc, argv, envp);
+
   run(*state);
   processTree = nullptr;
 
@@ -4373,6 +4785,7 @@ void Executor::runFunctionAsMain(Function *f,
 
   if (statsTracker)
     statsTracker->done();
+  listenerService->afterRunMethodAsMain(*state);
 }
 
 unsigned Executor::getPathStreamID(const ExecutionState &state) {
@@ -4632,13 +5045,13 @@ void Executor::dumpStates() {
     for (ExecutionState *es : states) {
       *os << "(" << es << ",";
       *os << "[";
-      auto next = es->stack.begin();
+      auto next = es->currentStack->realStack.begin();
       ++next;
-      for (auto sfIt = es->stack.begin(), sf_ie = es->stack.end();
+      for (auto sfIt = es->currentStack->realStack.begin(), sf_ie = es->currentStack->realStack.end();
            sfIt != sf_ie; ++sfIt) {
         *os << "('" << sfIt->kf->function->getName().str() << "',";
-        if (next == es->stack.end()) {
-          *os << es->prevPC->info->line << "), ";
+        if (next == es->currentStack->realStack.end()) {
+          *os << es->currentThread->prevPC->info->line << "), ";
         } else {
           *os << next->caller->info->line << "), ";
           ++next;
@@ -4646,11 +5059,11 @@ void Executor::dumpStates() {
       }
       *os << "], ";
 
-      StackFrame &sf = es->stack.back();
-      uint64_t md2u = computeMinDistToUncovered(es->pc,
+      StackFrame &sf = es->currentStack->realStack.back();
+      uint64_t md2u = computeMinDistToUncovered(es->currentThread->pc,
                                                 sf.minDistToUncoveredOnReturn);
       uint64_t icnt = theStatisticManager->getIndexedValue(stats::instructions,
-                                                           es->pc->info->id);
+                                                           es->currentThread->pc->info->id);
       uint64_t cpicnt = sf.callPathNode->statistics.getValue(stats::instructions);
 
       *os << "{";
@@ -4674,4 +5087,614 @@ void Executor::dumpStates() {
 Interpreter *Interpreter::create(LLVMContext &ctx, const InterpreterOptions &opts,
                                  InterpreterHandler *ih) {
   return new Executor(ctx, opts, ih);
+}
+
+/**
+ * 获取address对应的ObjectPair
+ */
+bool Executor::getMemoryObject(ObjectPair &op, ExecutionState &state,
+                               AddressSpace *addressSpace, ref<Expr> address) {
+  TimingSolver *solver = getTimeSolver();
+  bool success;
+  if (!addressSpace->resolveOne(state, solver, address, op, success)) {
+    address = toConstant(state, address, "resolveOne failure");
+    success = addressSpace->resolveOne(cast<ConstantExpr>(address), op);
+  }
+  return success;
+}
+
+bool Executor::isGlobalMO(const MemoryObject *mo) {
+  bool result;
+  if (mo->isGlobal) {
+    result = true;
+  } else {
+    if (mo->isLocal) {
+      result = false;
+    } else {
+      result = true;
+    }
+  }
+  return result;
+}
+
+bool Executor::isFunctionSpecial(Function *f) {
+  if (specialFunctionHandler->handlers.find(f) ==
+      specialFunctionHandler->handlers.end()) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+void Executor::runVerification(llvm::Function *f, int argc, char **argv,
+                               char **envp) {
+  while (!isFinished && execStatus != RUNTIMEERROR) {
+    execStatus = SUCCESS;
+    listenerService->startControl(this);
+    runFunctionAsMain(f, argc, argv, envp);
+    listenerService->endControl(this);
+    prepareNextExecution();
+  }
+}
+
+void Executor::prepareNextExecution() {
+  for (std::set<ExecutionState *>::const_iterator it = states.begin(),
+                                                  ie = states.end();
+       it != ie; ++it) {
+    delete *it;
+  }
+}
+
+void Executor::getNewPrefix() {
+  //获取新的前缀
+  Prefix *prefix = listenerService->getRuntimeDataManager()->getNextPrefix();
+  if (prefix) {
+    delete this->prefix;
+    this->prefix = prefix;
+    isFinished = false;
+  } else {
+    isFinished = true;
+#if PRINT_RUNTIMEINFO
+    printPrefix();
+#endif
+  }
+}
+
+/**
+ * 打印函数，用于打印执行的指令
+ */
+void Executor::printInstrcution(ExecutionState &state, KInstruction *ki) {
+  std::string fileName =
+      "trace" +
+      Transfer::uint64toString(listenerService->getRuntimeDataManager()->getCurrentTrace()->Id) + ".txt";
+  auto err = std::error_code();
+  raw_fd_ostream out(fileName.c_str(), err, sys::fs::F_Append);
+  if (prefix && prefix->isFinished()) {
+    out << "prefix finished\n";
+  }
+  Instruction *inst = ki->inst;
+  if (const auto &loc = ki->inst->getDebugLoc()) {
+    unsigned line = loc->getLine();
+    std::string file = loc->getFilename().str();
+    std::string dir = loc->getDirectory().str();
+    out << "thread" << state.currentThread->threadId << " " << dir << "/"
+        << file << " " << line << ": ";
+    inst->print(out);
+    switch (inst->getOpcode()) {
+    case Instruction::Call: {
+      CallSite cs(inst);
+      Value *fp = cs.getCalledValue();
+      Function *f = getTargetFunction(fp, state);
+      if (!f) {
+        ref<Expr> expr = eval(ki, 0, state).value;
+        ConstantExpr *constExpr = dyn_cast<ConstantExpr>(expr);
+        uint64_t functionPtr = constExpr->getZExtValue();
+        f = (Function *)functionPtr;
+      }
+      out << " " << f->getName().str();
+      if (f->getName().str() == "pthread_mutex_lock") {
+        ref<Expr> param = eval(ki, 1, state).value;
+        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+      } else if (f->getName().str() == "pthread_mutex_unlock") {
+        ref<Expr> param = eval(ki, 1, state).value;
+        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+      } else if (f->getName().str() == "pthread_cond_wait") {
+        // get lock
+        ref<Expr> param = eval(ki, 2, state).value;
+        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+        // get cond
+        param = eval(ki, 1, state).value;
+        cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+      } else if (f->getName().str() == "pthread_cond_signal") {
+        ref<Expr> param = eval(ki, 1, state).value;
+        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+      } else if (f->getName().str() == "pthread_cond_broadcast") {
+        ref<Expr> param = eval(ki, 1, state).value;
+        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+        out << " " << cexpr->getZExtValue();
+      }
+      break;
+    }
+    }
+    out << '\n';
+  } else {
+    out << "thread" << state.currentThread->threadId
+        << " klee/internal 0: " << inst->getOpcodeName() << '\n';
+  }
+
+  out.close();
+  if (prefix && prefix->current() + 1 == prefix->end()) {
+    inst->print(errs());
+    Event *event = *prefix->current();
+    ref<Expr> param = eval(ki, 0, state).value;
+    ConstantExpr *condition = dyn_cast<ConstantExpr>(param);
+    if (condition->getAPValue().getBoolValue() != event->brCondition) {
+      llvm::errs() << "\n前缀已被取反\n";
+    } else {
+      llvm::errs() << "\n前缀未被取反\n";
+    }
+  }
+}
+
+void Executor::printPrefix() {
+  if (prefix) {
+    std::string fileName = prefix->getName() + ".txt";
+    auto err = std::error_code();
+    raw_fd_ostream out(fileName.c_str(), err, sys::fs::F_Append);
+    prefix->print(out);
+    out.close();
+  }
+}
+
+/**
+ * execute pthread_create
+ * if the first pointer is not point to a unsigned int, this function will crash
+ * ylc
+ **/
+unsigned Executor::executePThreadCreate(ExecutionState &state, KInstruction *ki,
+                                        std::vector<ref<Expr>> &arguments) {
+  CallInst *calli = dyn_cast<CallInst>(ki->inst);
+  if (calli) {
+    assert(calli->getNumArgOperands() == 4 && "pthread_create has 4 params");
+    Value *threadEntranceFP = calli->getArgOperand(2);
+    Function *threadEntrance = getTargetFunction(threadEntranceFP, state);
+    if (!threadEntrance) {
+      ref<Expr> param = eval(ki, 3, state).value;
+      ConstantExpr *functionPtr = dyn_cast<ConstantExpr>(param);
+      threadEntrance = (Function *)(functionPtr->getZExtValue());
+    }
+    KFunction *kthreadEntrance = kmodule->functionMap[threadEntrance];
+    Thread *newThread = NULL;
+    if (prefix && !prefix->isFinished()) {
+      newThread =
+          state.createThread(kthreadEntrance, prefix->getNextThreadId());
+    } else {
+      newThread = state.createThread(kthreadEntrance);
+    }
+
+    // vector clock : creat
+    Thread *thread = state.getCurrentThread();
+    for (unsigned i = 0; i < thread->vectorClock.size(); i++) {
+      newThread->vectorClock[i] = thread->vectorClock[i];
+    }
+    newThread->vectorClock[newThread->threadId]++;
+
+    state.currentStack = newThread->stack;
+    bindArgument(kthreadEntrance, 0, state, arguments[3]);
+    state.currentStack = thread->stack;
+
+    if (statsTracker)
+      statsTracker->framePushed(state, 0);
+    //		PTree* ptree = new PTree(newThread);
+    //		ptreeVector[nextThreadId] = ptree;
+
+    // set threadId to function's first param
+    PointerType *pointerType =
+        (PointerType *)(calli->getArgOperand(0)->getType());
+    IntegerType *elementType = (IntegerType *)(pointerType->getElementType());
+    Expr::Width type = elementType->getBitWidth();
+    ref<Expr> pidAddress = arguments[0];
+    executeMemoryOperation(state, true, pidAddress,
+                           ConstantExpr::create(newThread->threadId, type), 0);
+  } else {
+    assert(0 && "inst must be callInst!");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_join
+ * if the first pointer is not point to a unsigned int, this function will crash
+ * ylc
+ */
+unsigned Executor::executePThreadJoin(ExecutionState &state, KInstruction *ki,
+                                      std::vector<ref<Expr>> &arguments) {
+  CallInst *calli = dyn_cast<CallInst>(ki->inst);
+  if (calli) {
+    ref<ConstantExpr> threadIdExpr = dyn_cast<ConstantExpr>(arguments[0]);
+    //		llvm::errs() << " joinedThreadId : " << threadIdExpr << "\n";
+    unsigned threadId = threadIdExpr->getZExtValue();
+    Thread *joinThread = state.findThreadById(threadId);
+    if (joinThread) {
+      if (!joinThread->isTerminated()) {
+        std::map<unsigned, std::vector<unsigned>>::iterator ji =
+            state.joinRecord.find(threadId);
+        if (ji == state.joinRecord.end()) {
+          std::vector<unsigned> blockedList;
+          blockedList.push_back(state.currentThread->threadId);
+          state.joinRecord.insert(make_pair(threadId, blockedList));
+        } else {
+          ji->second.push_back(state.currentThread->threadId);
+        }
+        state.swapOutThread(state.currentThread, false, false, true, false);
+        ;
+      }
+    } else {
+      assert(0 && "thread not exist!");
+    }
+  } else {
+    assert(0 && "inst must be callInst!");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_cond_wait
+ */
+unsigned Executor::executePThreadCondWait(ExecutionState &state,
+                                          KInstruction *ki,
+                                          std::vector<ref<Expr>> &arguments) {
+  ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
+  ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(arguments[1]);
+  if (!mutexAddress) {
+    assert(0 && "mutex address is not const");
+  }
+  if (!condAddress) {
+    assert(0 && "cond address is not const");
+  }
+  std::string condName = Transfer::uint64toString(condAddress->getZExtValue());
+  std::string mutexName =
+      Transfer::uint64toString(mutexAddress->getZExtValue());
+  std::string errorMsg;
+  bool isSuccess = state.condManager.wait(
+      condName, mutexName, state.currentThread->threadId, errorMsg);
+  if (isSuccess) {
+    state.swapOutThread(state.currentThread, true, false, false, false);
+  } else {
+    llvm::errs() << errorMsg << "\n";
+    assert(0 && "wait error");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_cond_signal
+ */
+unsigned Executor::executePThreadCondSignal(ExecutionState &state,
+                                            KInstruction *ki,
+                                            std::vector<ref<Expr>> &arguments) {
+  ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
+  if (!condAddress) {
+    assert(0 && "cond address is not const");
+  }
+  std::string condName = Transfer::uint64toString(condAddress->getZExtValue());
+  std::string errorMsg;
+  unsigned releasedThreadId;
+  bool isSuccess =
+      state.condManager.signal(condName, releasedThreadId, errorMsg);
+  if (isSuccess) {
+    if (releasedThreadId != 0) {
+      state.swapInThread(releasedThreadId, false, true);
+
+      // vector clock : signal
+      Thread *thread = state.getCurrentThread();
+      Thread *tthread = state.findThreadById(releasedThreadId);
+      for (unsigned i = 0; i < tthread->vectorClock.size(); i++) {
+        if (tthread->vectorClock[i] < thread->vectorClock[i]) {
+          tthread->vectorClock[i] = thread->vectorClock[i];
+        }
+      }
+      thread->vectorClock[thread->threadId]++;
+    }
+  } else {
+    llvm::errs() << errorMsg << "\n";
+    assert(0 && "signal failed");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_cond_broadcast
+ */
+unsigned
+Executor::executePThreadCondBroadcast(ExecutionState &state, KInstruction *ki,
+                                      std::vector<ref<Expr>> &arguments) {
+  ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
+  if (!condAddress) {
+    assert(0 && "cond address is not const");
+  }
+  std::string condName = Transfer::uint64toString(condAddress->getZExtValue());
+  std::vector<unsigned> threadList;
+  std::string errorMsg;
+  bool isSuccess = state.condManager.broadcast(condName, threadList, errorMsg);
+  if (isSuccess) {
+    std::vector<unsigned>::iterator ti, te;
+    std::vector<bool>::iterator bi;
+    for (ti = threadList.begin(), te = threadList.end(); ti != te; ti++, bi++) {
+      state.swapInThread(*ti, false, true);
+
+      // vector clock : signal
+      Thread *thread = state.getCurrentThread();
+      Thread *tthread = state.findThreadById(*ti);
+      for (unsigned i = 0; i < tthread->vectorClock.size(); i++) {
+        if (tthread->vectorClock[i] < thread->vectorClock[i]) {
+          tthread->vectorClock[i] = thread->vectorClock[i];
+        }
+      }
+      thread->vectorClock[thread->threadId]++;
+    }
+  } else {
+    llvm::errs() << errorMsg << "\n";
+    assert(0 && "broadcast failed");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_mutex_lock
+ */
+unsigned Executor::executePThreadMutexLock(ExecutionState &state,
+                                           KInstruction *ki,
+                                           std::vector<ref<Expr>> &arguments) {
+  ref<Expr> address = arguments[0];
+  ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(address);
+  // cerr << " lock param : " << mutexAddress->getZExtValue();
+  if (mutexAddress) {
+    std::string key = Transfer::uint64toString(mutexAddress->getZExtValue());
+    std::string errorMsg;
+    bool isBlocked;
+    bool isSuccess = state.mutexManager.lock(key, state.currentThread->threadId,
+                                             isBlocked, errorMsg);
+    if (isSuccess) {
+      if (isBlocked) {
+        state.switchThreadToMutexBlocked(state.currentThread);
+      }
+    } else {
+      llvm::errs() << errorMsg << "\n";
+      assert(0 && "lock error!");
+    }
+  } else {
+    assert(0 && "mutex address is not const");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_mutex_unlock
+ */
+unsigned
+Executor::executePThreadMutexUnlock(ExecutionState &state, KInstruction *ki,
+                                    std::vector<ref<Expr>> &arguments) {
+  ref<Expr> address = arguments[0];
+  ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(address);
+  if (mutexAddress) {
+    std::string key = Transfer::uint64toString(mutexAddress->getZExtValue());
+    std::string errorMsg;
+    bool isSuccess = state.mutexManager.unlock(key, errorMsg);
+    if (!isSuccess) {
+      llvm::errs() << errorMsg << "\n";
+      assert(0 && "unlock error");
+    }
+  } else {
+    assert(0 && "mutex address is not const");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_barrier_init
+ */
+unsigned
+Executor::executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
+                                    std::vector<ref<Expr>> &arguments) {
+  ConstantExpr *barrierAddress = dyn_cast<ConstantExpr>(arguments[0]);
+  ConstantExpr *count = dyn_cast<ConstantExpr>(arguments[2]);
+  if (!barrierAddress) {
+    assert(0 && "barrier address is not const");
+  }
+  if (!count) {
+    assert(0 && "count is not const");
+  }
+  std::string barrierName =
+      Transfer::uint64toString(barrierAddress->getZExtValue());
+  std::string errorMsg;
+  bool isSuccess =
+      state.barrierManager.init(barrierName, count->getZExtValue(), errorMsg);
+  if (!isSuccess) {
+    llvm::errs() << errorMsg << "\n";
+    assert(0 && "barrier init error");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_barrier_wait
+ */
+unsigned
+Executor::executePThreadBarrierWait(ExecutionState &state, KInstruction *ki,
+                                    std::vector<ref<Expr>> &arguments) {
+  ConstantExpr *barrierAddress = dyn_cast<ConstantExpr>(arguments[0]);
+  if (!barrierAddress) {
+    assert(0 && "barrier address is not const");
+  }
+  std::string barrierName =
+      Transfer::uint64toString(barrierAddress->getZExtValue());
+  std::vector<unsigned> blockedList;
+  bool isReleased = false;
+  std::string errorMsg;
+  bool isSuccess =
+      state.barrierManager.wait(barrierName, state.currentThread->threadId,
+                                isReleased, blockedList, errorMsg);
+  if (isSuccess) {
+    if (isReleased) {
+      // may be a bottleneck as time complexity is O(n*n)
+      // ylc
+      for (std::vector<unsigned>::iterator ti = blockedList.begin(),
+                                           te = blockedList.end();
+           ti != te; ti++) {
+        unsigned threadId = *ti;
+        if (threadId != state.currentThread->threadId) {
+          state.swapInThread(threadId, true, false);
+        }
+      }
+    } else {
+      state.swapOutThread(state.currentThread, false, true, false, false);
+    }
+  } else {
+    llvm::errs() << errorMsg << "\n";
+    assert("barrier wait error");
+  }
+  return 0;
+}
+
+/**
+ * execute pthread_barrier_destory
+ */
+unsigned
+Executor::executePThreadBarrierDestory(ExecutionState &state, KInstruction *ki,
+                                       std::vector<ref<Expr>> &arguments) {
+  return 0;
+}
+
+/**
+ * handle global mutex, condition and barrier
+ *
+ */
+void Executor::handleInitializers(ExecutionState &initialState) {
+  for (Module::const_global_iterator i = kmodule->module->global_begin(),
+                                     e = kmodule->module->global_end();
+       i != e; ++i) {
+    if (i->hasInitializer() && i->getName().str().at(0) != '.') {
+      Type *type = i->getInitializer()->getType();
+      ref<ConstantExpr> address = globalAddresses.find(&*i)->second;
+      uint64_t startAddress = address->getZExtValue();
+      createSpecialElement(initialState, type, startAddress, true);
+    }
+  }
+}
+
+//创建mutex,cond，barrier时可能会重复创建引发断言错误，待修正！
+// ylc
+/**
+ * find all mutex, cond and barrier behind startAddress
+ * type:
+ * startAddress:
+ */
+void Executor::createSpecialElement(ExecutionState &state, Type *type,
+                                    uint64_t &startAddress,
+                                    bool isInitializer) {
+
+  //	llvm::errs() << "type : " << type->getTypeID() << "\n";
+  //	llvm::errs() << "startAddress : " << startAddress << "\n";
+
+  switch (type->getTypeID()) {
+
+  case Type::IntegerTyID:
+  case Type::FloatTyID:
+  case Type::DoubleTyID: {
+    DataLayout *layout = kmodule->targetData.get();
+    unsigned alignment = layout->getABITypeAlignment(type);
+    if (startAddress % alignment != 0) {
+      startAddress = (startAddress / alignment + 1) * alignment;
+    }
+    startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+    break;
+  }
+
+  case Type::PointerTyID: {
+    DataLayout *layout = kmodule->targetData.get();
+    unsigned alignment = layout->getABITypeAlignment(type);
+    if (startAddress % alignment != 0) {
+      startAddress = (startAddress / alignment + 1) * alignment;
+    }
+    startAddress += Context::get().getPointerWidth() / 8;
+    break;
+  }
+
+  case Type::ArrayTyID: {
+    unsigned num = type->getArrayNumElements();
+    for (unsigned i = 0; i < num; i++) {
+      Type *elementType = type->getArrayElementType();
+      createSpecialElement(state, elementType, startAddress, isInitializer);
+    }
+    break;
+  }
+
+  case Type::VectorTyID: {
+    unsigned num = type->getVectorNumElements();
+    for (unsigned i = 0; i < num; i++) {
+      Type *elementType = type->getVectorElementType();
+      createSpecialElement(state, elementType, startAddress, isInitializer);
+    }
+    break;
+  }
+
+  case Type::StructTyID: {
+    std::string errorMsg;
+    //			llvm::errs() << "StructName : " << type->getStructName().str() <<
+    //"\n";
+    //下列代码只是为了处理三种特殊结构体的内存对齐，对于复杂对象，其第一个元素在被访问时会计算内存对齐，因此不需要额外对复杂对象计算
+    //内存对齐，这里计算结构体的内存对齐只是因为mutex，cond，barrier三种类型不会被解析，因此需要提前计算。
+    DataLayout *layout = kmodule->targetData.get();
+    //检查是否是opaque结构体，如果是跳过不做处理
+    if (!dyn_cast<StructType>(type)->isOpaque() &&
+        !dyn_cast<StructType>(type)->isLiteral()) {
+      unsigned alignment = layout->getABITypeAlignment(type);
+      if (startAddress % alignment != 0) {
+        startAddress = (startAddress / alignment + 1) * alignment;
+      }
+      if (type->getStructName() == "union.pthread_mutex_t") {
+        std::string mutexName = Transfer::uint64toString(startAddress);
+        state.mutexManager.addMutex(mutexName, errorMsg);
+        //					llvm::errs() << "mutexName : " <<
+        //mutexName << "\n";
+        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+      } else if (type->getStructName() == "union.pthread_cond_t") {
+        std::string condName = Transfer::uint64toString(startAddress);
+        if (prefix) {
+          state.condManager.addCondition(condName, errorMsg, prefix);
+        } else {
+          state.condManager.addCondition(condName, errorMsg);
+        }
+        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+      } else if (type->getStructName() == "union.pthread_barrier_t") {
+        state.barrierManager.addBarrier(Transfer::uint64toString(startAddress),
+                                        errorMsg);
+        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+      } else {
+        unsigned num = type->getStructNumElements();
+        for (unsigned i = 0; i < num; i++) {
+          Type *elementType = type->getStructElementType(i);
+          createSpecialElement(state, elementType, startAddress, isInitializer);
+        }
+      }
+    }
+    break;
+  }
+
+  case Type::FunctionTyID: {
+    // only met with function pointer, can we skipping it?
+    // ylc
+    break;
+  }
+
+  default: {
+    //			assert(0 && "unsupport initializer type");
+  }
+  }
 }
