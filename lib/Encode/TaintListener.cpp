@@ -247,7 +247,7 @@ namespace klee {
 		}
 	}
 
-//TODO： Algorithm 2 AnalyseTaint
+	//TODO： Algorithm 2 AnalyseTaint
 	void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction *ki) {
 		Trace* trace = rdManager->getCurrentTrace();
 		if (currentEvent) {

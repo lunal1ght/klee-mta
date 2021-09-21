@@ -90,8 +90,8 @@ void klee::initializeSearchOptions() {
       klee_warning("--use-merge enabled. Using NURS_CovNew as default searcher.");
     } else {
       CoreSearch.push_back(Searcher::DFS);
-      CoreSearch.push_back(Searcher::RandomPath);
-      CoreSearch.push_back(Searcher::NURS_CovNew);
+      // CoreSearch.push_back(Searcher::RandomPath);
+      // CoreSearch.push_back(Searcher::NURS_CovNew);
     }
   }
 }
