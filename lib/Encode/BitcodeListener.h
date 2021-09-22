@@ -22,7 +22,7 @@ namespace klee {
 class BitcodeListener {
 	public:
 
-		enum listenerKind {
+		enum ListenerKind {
 			defaultKind,
 			PSOListenerKind,
 			SymbolicListenerKind,
@@ -34,7 +34,7 @@ class BitcodeListener {
 		BitcodeListener(RuntimeDataManager* rdManager);
 		virtual ~BitcodeListener();
 
-		listenerKind kind;
+		ListenerKind kind;
 
 		RuntimeDataManager* rdManager;
 
@@ -48,9 +48,6 @@ class BitcodeListener {
 		virtual void afterExecuteInstruction(ExecutionState &state, KInstruction *ki) = 0;
 		virtual void afterRunMethodAsMain(ExecutionState &state) = 0;
 		virtual void executionFailed(ExecutionState &state, KInstruction *ki) = 0;
-
-
-
 };
 
 }

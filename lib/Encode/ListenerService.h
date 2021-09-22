@@ -24,7 +24,7 @@ namespace klee {
 	class ListenerService {
 
 		private:
-			std::vector<BitcodeListener*> bitcodeListeners;
+			std::vector<BitcodeListener *> bitcodeListeners;
 			RuntimeDataManager rdManager;
 			Encode *encode;
 			DTAM *dtam;
@@ -37,7 +37,7 @@ namespace klee {
 
 			void pushListener(BitcodeListener* bitcodeListener);
 			void removeListener(BitcodeListener* bitcodeListener);
-			void removeListener(BitcodeListener::listenerKind kind);
+			void removeListener(BitcodeListener::ListenerKind kind);
 			void popListener();
 
 			RuntimeDataManager* getRuntimeDataManager();

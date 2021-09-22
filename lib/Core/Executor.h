@@ -244,7 +244,7 @@ private:
 
   ExecStatus execStatus;
 
-  bool hasInitialized = 0;
+  static bool hasInitialized;
 
   /// Return the typeid corresponding to a certain `type_info`
   ref<ConstantExpr> getEhTypeidFor(ref<Expr> type_info);

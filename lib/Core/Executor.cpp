@@ -460,6 +460,7 @@ const char *Executor::TerminateReasonNames[] = {
   [ Unhandled ] = "xxx",
 };
 
+bool Executor::hasInitialized = false;
 
 Executor::Executor(LLVMContext &ctx, const InterpreterOptions &opts,
                    InterpreterHandler *ih)
@@ -521,6 +522,8 @@ Executor::Executor(LLVMContext &ctx, const InterpreterOptions &opts,
                  error.c_str());
     }
   }
+  ///@hy
+	listenerService = new ListenerService(this);
 }
 
 llvm::Module *
@@ -1225,7 +1228,7 @@ void Executor::addConstraint(ExecutionState &state, ref<Expr> condition) {
 }
 
 const Cell& Executor::eval(KInstruction *ki, unsigned index, ExecutionState &state) const {
-	assert(index < ki->inst->getNumOperands());
+  assert(index < ki->inst->getNumOperands());
 	int vnumber = ki->operands[index];
 	assert(vnumber != -1 && "Invalid operand to eval(), not a value or constant!");
 
@@ -2057,7 +2060,16 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
     
     if (state.currentStack->realStack.size() <= 1) {
       assert(!caller && "caller set on initial stack frame");
-      terminateStateOnExit(state);
+      std::map<unsigned, std::vector<unsigned>>::iterator ji =
+          state.joinRecord.find(state.currentThread->threadId);
+      if (ji != state.joinRecord.end()) {
+        for (std::vector<unsigned>::iterator bi = ji->second.begin(),
+                                             be = ji->second.end();
+             bi != be; bi++) {
+          state.swapInThread(*bi, true, false);
+        }
+      }
+      state.swapOutThread(state.currentThread, false, false, false, true);
     } else {
       state.currentStack->popFrame();
 
@@ -2832,8 +2844,7 @@ void Executor::executeInstruction(ExecutionState &state, KInstruction *ki) {
         return terminateStateOnExecError(state, "Unsupported FAdd operation");
 
 #if LLVM_VERSION_CODE >= LLVM_VERSION(3, 3)
-      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()),
-                        left->getAPValue());
+      llvm::APFloat Res(*fpWidthToSemantics(left->getWidth()), left->getAPValue());
       Res.add(
           APFloat(*fpWidthToSemantics(right->getWidth()), right->getAPValue()),
           APFloat::rmNearestTiesToEven);
@@ -3622,6 +3633,7 @@ void Executor::bindModuleConstants() {
   // avoid multiple assignment of getElementPtr's indices
   // add by ylc
   if (!hasInitialized) {
+    hasInitialized = true;
     for (auto &kfp : kmodule->functions) {
       KFunction *kf = kfp.get();
       for (unsigned i = 0; i < kf->numInstructions; ++i)
@@ -3796,7 +3808,7 @@ void Executor::run(ExecutionState &initialState) {
                            << thread->pc->info->file << "/"
                            << thread->pc->info->line << " "
                            << thread->pc->inst->getOpcodeName() << "\n";
-              // thread->pc->inst->dump();
+              thread->pc->inst->dump();
               llvm::errs() << "thread state is MUTEX_BLOCKED, try to get lock "
                               "but failed\n";
               isAbleToRun = false;
