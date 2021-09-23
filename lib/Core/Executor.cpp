@@ -5101,11 +5101,9 @@ Interpreter *Interpreter::create(LLVMContext &ctx, const InterpreterOptions &opt
   return new Executor(ctx, opts, ih);
 }
 
-/**
- * 获取address对应的ObjectPair
- */
-bool Executor::getMemoryObject(ObjectPair &op, ExecutionState &state,
-                               AddressSpace *addressSpace, ref<Expr> address) {
+
+// 获取address对应的ObjectPair
+bool Executor::getMemoryObject(ObjectPair &op, ExecutionState &state, AddressSpace *addressSpace, ref<Expr> address) {
   TimingSolver *solver = getTimeSolver();
   bool success;
   if (!addressSpace->resolveOne(state, solver, address, op, success)) {
@@ -5130,16 +5128,14 @@ bool Executor::isGlobalMO(const MemoryObject *mo) {
 }
 
 bool Executor::isFunctionSpecial(Function *f) {
-  if (specialFunctionHandler->handlers.find(f) ==
-      specialFunctionHandler->handlers.end()) {
+  if (specialFunctionHandler->handlers.find(f) == specialFunctionHandler->handlers.end()) {
     return false;
   } else {
     return true;
   }
 }
 
-void Executor::runVerification(llvm::Function *f, int argc, char **argv,
-                               char **envp) {
+void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **envp) {
   while (!isFinished && execStatus != RUNTIMEERROR) {
     execStatus = SUCCESS;
     listenerService->startControl(this);
@@ -5150,9 +5146,7 @@ void Executor::runVerification(llvm::Function *f, int argc, char **argv,
 }
 
 void Executor::prepareNextExecution() {
-  for (std::set<ExecutionState *>::const_iterator it = states.begin(),
-                                                  ie = states.end();
-       it != ie; ++it) {
+  for (std::set<ExecutionState *>::const_iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
     delete *it;
   }
 }
@@ -5172,13 +5166,10 @@ void Executor::getNewPrefix() {
   }
 }
 
-/**
- * 打印函数，用于打印执行的指令
- */
+// 打印函数，用于打印执行的指令
 void Executor::printInstrcution(ExecutionState &state, KInstruction *ki) {
   std::string fileName =
-      "trace" +
-      Transfer::uint64toString(listenerService->getRuntimeDataManager()->getCurrentTrace()->Id) + ".txt";
+      "trace" + Transfer::uint64toString(listenerService->getRuntimeDataManager()->getCurrentTrace()->Id) + ".txt";
   auto err = std::error_code();
   raw_fd_ostream out(fileName.c_str(), err, sys::fs::F_Append);
   if (prefix && prefix->isFinished()) {
@@ -5189,54 +5180,52 @@ void Executor::printInstrcution(ExecutionState &state, KInstruction *ki) {
     unsigned line = loc->getLine();
     std::string file = loc->getFilename().str();
     std::string dir = loc->getDirectory().str();
-    out << "thread" << state.currentThread->threadId << " " << dir << "/"
-        << file << " " << line << ": ";
+    out << "thread" << state.currentThread->threadId << " " << dir << "/" << file << " " << line << ": ";
     inst->print(out);
     switch (inst->getOpcode()) {
-    case Instruction::Call: {
-      CallSite cs(inst);
-      Value *fp = cs.getCalledValue();
-      Function *f = getTargetFunction(fp, state);
-      if (!f) {
-        ref<Expr> expr = eval(ki, 0, state).value;
-        ConstantExpr *constExpr = dyn_cast<ConstantExpr>(expr);
-        uint64_t functionPtr = constExpr->getZExtValue();
-        f = (Function *)functionPtr;
+      case Instruction::Call: {
+        CallSite cs(inst);
+        Value *fp = cs.getCalledValue();
+        Function *f = getTargetFunction(fp, state);
+        if (!f) {
+          ref<Expr> expr = eval(ki, 0, state).value;
+          ConstantExpr *constExpr = dyn_cast<ConstantExpr>(expr);
+          uint64_t functionPtr = constExpr->getZExtValue();
+          f = (Function *)functionPtr;
+        }
+        out << " " << f->getName().str();
+        if (f->getName().str() == "pthread_mutex_lock") {
+          ref<Expr> param = eval(ki, 1, state).value;
+          ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+        } else if (f->getName().str() == "pthread_mutex_unlock") {
+          ref<Expr> param = eval(ki, 1, state).value;
+          ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+        } else if (f->getName().str() == "pthread_cond_wait") {
+          // get lock
+          ref<Expr> param = eval(ki, 2, state).value;
+          ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+          // get cond
+          param = eval(ki, 1, state).value;
+          cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+        } else if (f->getName().str() == "pthread_cond_signal") {
+          ref<Expr> param = eval(ki, 1, state).value;
+          ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+        } else if (f->getName().str() == "pthread_cond_broadcast") {
+          ref<Expr> param = eval(ki, 1, state).value;
+          ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
+          out << " " << cexpr->getZExtValue();
+        }
+        break;
       }
-      out << " " << f->getName().str();
-      if (f->getName().str() == "pthread_mutex_lock") {
-        ref<Expr> param = eval(ki, 1, state).value;
-        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-      } else if (f->getName().str() == "pthread_mutex_unlock") {
-        ref<Expr> param = eval(ki, 1, state).value;
-        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-      } else if (f->getName().str() == "pthread_cond_wait") {
-        // get lock
-        ref<Expr> param = eval(ki, 2, state).value;
-        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-        // get cond
-        param = eval(ki, 1, state).value;
-        cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-      } else if (f->getName().str() == "pthread_cond_signal") {
-        ref<Expr> param = eval(ki, 1, state).value;
-        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-      } else if (f->getName().str() == "pthread_cond_broadcast") {
-        ref<Expr> param = eval(ki, 1, state).value;
-        ConstantExpr *cexpr = dyn_cast<ConstantExpr>(param);
-        out << " " << cexpr->getZExtValue();
-      }
-      break;
-    }
     }
     out << '\n';
   } else {
-    out << "thread" << state.currentThread->threadId
-        << " klee/internal 0: " << inst->getOpcodeName() << '\n';
+    out << "thread" << state.currentThread->threadId << " klee/internal 0: " << inst->getOpcodeName() << '\n';
   }
 
   out.close();
@@ -5263,13 +5252,10 @@ void Executor::printPrefix() {
   }
 }
 
-/**
- * execute pthread_create
- * if the first pointer is not point to a unsigned int, this function will crash
- * ylc
- **/
-unsigned Executor::executePThreadCreate(ExecutionState &state, KInstruction *ki,
-                                        std::vector<ref<Expr>> &arguments) {
+
+// execute pthread_create
+// if the first pointer is not point to a unsigned int, this function will crash
+unsigned Executor::executePThreadCreate(ExecutionState &state, KInstruction *ki, std::vector<ref<Expr>> &arguments) {
   CallInst *calli = dyn_cast<CallInst>(ki->inst);
   if (calli) {
     assert(calli->getNumArgOperands() == 4 && "pthread_create has 4 params");
@@ -5283,8 +5269,7 @@ unsigned Executor::executePThreadCreate(ExecutionState &state, KInstruction *ki,
     KFunction *kthreadEntrance = kmodule->functionMap[threadEntrance];
     Thread *newThread = NULL;
     if (prefix && !prefix->isFinished()) {
-      newThread =
-          state.createThread(kthreadEntrance, prefix->getNextThreadId());
+      newThread = state.createThread(kthreadEntrance, prefix->getNextThreadId());
     } else {
       newThread = state.createThread(kthreadEntrance);
     }
@@ -5302,40 +5287,30 @@ unsigned Executor::executePThreadCreate(ExecutionState &state, KInstruction *ki,
 
     if (statsTracker)
       statsTracker->framePushed(state, 0);
-    //		PTree* ptree = new PTree(newThread);
-    //		ptreeVector[nextThreadId] = ptree;
 
     // set threadId to function's first param
-    PointerType *pointerType =
-        (PointerType *)(calli->getArgOperand(0)->getType());
+    PointerType *pointerType = (PointerType *)(calli->getArgOperand(0)->getType());
     IntegerType *elementType = (IntegerType *)(pointerType->getElementType());
     Expr::Width type = elementType->getBitWidth();
     ref<Expr> pidAddress = arguments[0];
-    executeMemoryOperation(state, true, pidAddress,
-                           ConstantExpr::create(newThread->threadId, type), 0);
+    executeMemoryOperation(state, true, pidAddress, ConstantExpr::create(newThread->threadId, type), 0);
   } else {
     assert(0 && "inst must be callInst!");
   }
   return 0;
 }
 
-/**
- * execute pthread_join
- * if the first pointer is not point to a unsigned int, this function will crash
- * ylc
- */
-unsigned Executor::executePThreadJoin(ExecutionState &state, KInstruction *ki,
-                                      std::vector<ref<Expr>> &arguments) {
+// execute pthread_join
+// if the first pointer is not point to a unsigned int, this function will crash
+unsigned Executor::executePThreadJoin(ExecutionState &state, KInstruction *ki, std::vector<ref<Expr>> &arguments) {
   CallInst *calli = dyn_cast<CallInst>(ki->inst);
   if (calli) {
     ref<ConstantExpr> threadIdExpr = dyn_cast<ConstantExpr>(arguments[0]);
-    //		llvm::errs() << " joinedThreadId : " << threadIdExpr << "\n";
     unsigned threadId = threadIdExpr->getZExtValue();
     Thread *joinThread = state.findThreadById(threadId);
     if (joinThread) {
       if (!joinThread->isTerminated()) {
-        std::map<unsigned, std::vector<unsigned>>::iterator ji =
-            state.joinRecord.find(threadId);
+        std::map<unsigned, std::vector<unsigned>>::iterator ji = state.joinRecord.find(threadId);
         if (ji == state.joinRecord.end()) {
           std::vector<unsigned> blockedList;
           blockedList.push_back(state.currentThread->threadId);
@@ -5355,12 +5330,8 @@ unsigned Executor::executePThreadJoin(ExecutionState &state, KInstruction *ki,
   return 0;
 }
 
-/**
- * execute pthread_cond_wait
- */
-unsigned Executor::executePThreadCondWait(ExecutionState &state,
-                                          KInstruction *ki,
-                                          std::vector<ref<Expr>> &arguments) {
+// execute pthread_cond_wait
+unsigned Executor::executePThreadCondWait(ExecutionState &state, KInstruction *ki, std::vector<ref<Expr>> &arguments) {
   ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
   ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(arguments[1]);
   if (!mutexAddress) {
@@ -5370,11 +5341,9 @@ unsigned Executor::executePThreadCondWait(ExecutionState &state,
     assert(0 && "cond address is not const");
   }
   std::string condName = Transfer::uint64toString(condAddress->getZExtValue());
-  std::string mutexName =
-      Transfer::uint64toString(mutexAddress->getZExtValue());
+  std::string mutexName = Transfer::uint64toString(mutexAddress->getZExtValue());
   std::string errorMsg;
-  bool isSuccess = state.condManager.wait(
-      condName, mutexName, state.currentThread->threadId, errorMsg);
+  bool isSuccess = state.condManager.wait(condName, mutexName, state.currentThread->threadId, errorMsg);
   if (isSuccess) {
     state.swapOutThread(state.currentThread, true, false, false, false);
   } else {
@@ -5384,11 +5353,8 @@ unsigned Executor::executePThreadCondWait(ExecutionState &state,
   return 0;
 }
 
-/**
- * execute pthread_cond_signal
- */
-unsigned Executor::executePThreadCondSignal(ExecutionState &state,
-                                            KInstruction *ki,
+// execute pthread_cond_signal
+unsigned Executor::executePThreadCondSignal(ExecutionState &state, KInstruction *ki,
                                             std::vector<ref<Expr>> &arguments) {
   ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
   if (!condAddress) {
@@ -5397,8 +5363,7 @@ unsigned Executor::executePThreadCondSignal(ExecutionState &state,
   std::string condName = Transfer::uint64toString(condAddress->getZExtValue());
   std::string errorMsg;
   unsigned releasedThreadId;
-  bool isSuccess =
-      state.condManager.signal(condName, releasedThreadId, errorMsg);
+  bool isSuccess = state.condManager.signal(condName, releasedThreadId, errorMsg);
   if (isSuccess) {
     if (releasedThreadId != 0) {
       state.swapInThread(releasedThreadId, false, true);
@@ -5420,12 +5385,9 @@ unsigned Executor::executePThreadCondSignal(ExecutionState &state,
   return 0;
 }
 
-/**
- * execute pthread_cond_broadcast
- */
-unsigned
-Executor::executePThreadCondBroadcast(ExecutionState &state, KInstruction *ki,
-                                      std::vector<ref<Expr>> &arguments) {
+// execute pthread_cond_broadcast
+unsigned Executor::executePThreadCondBroadcast(ExecutionState &state, KInstruction *ki,
+                                               std::vector<ref<Expr>> &arguments) {
   ConstantExpr *condAddress = dyn_cast<ConstantExpr>(arguments[0]);
   if (!condAddress) {
     assert(0 && "cond address is not const");
@@ -5457,12 +5419,8 @@ Executor::executePThreadCondBroadcast(ExecutionState &state, KInstruction *ki,
   return 0;
 }
 
-/**
- * execute pthread_mutex_lock
- */
-unsigned Executor::executePThreadMutexLock(ExecutionState &state,
-                                           KInstruction *ki,
-                                           std::vector<ref<Expr>> &arguments) {
+// execute pthread_mutex_lock
+unsigned Executor::executePThreadMutexLock(ExecutionState &state, KInstruction *ki, std::vector<ref<Expr>> &arguments) {
   ref<Expr> address = arguments[0];
   ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(address);
   // cerr << " lock param : " << mutexAddress->getZExtValue();
@@ -5470,8 +5428,7 @@ unsigned Executor::executePThreadMutexLock(ExecutionState &state,
     std::string key = Transfer::uint64toString(mutexAddress->getZExtValue());
     std::string errorMsg;
     bool isBlocked;
-    bool isSuccess = state.mutexManager.lock(key, state.currentThread->threadId,
-                                             isBlocked, errorMsg);
+    bool isSuccess = state.mutexManager.lock(key, state.currentThread->threadId, isBlocked, errorMsg);
     if (isSuccess) {
       if (isBlocked) {
         state.switchThreadToMutexBlocked(state.currentThread);
@@ -5486,12 +5443,9 @@ unsigned Executor::executePThreadMutexLock(ExecutionState &state,
   return 0;
 }
 
-/**
- * execute pthread_mutex_unlock
- */
-unsigned
-Executor::executePThreadMutexUnlock(ExecutionState &state, KInstruction *ki,
-                                    std::vector<ref<Expr>> &arguments) {
+// execute pthread_mutex_unlock
+unsigned Executor::executePThreadMutexUnlock(ExecutionState &state, KInstruction *ki,
+                                             std::vector<ref<Expr>> &arguments) {
   ref<Expr> address = arguments[0];
   ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(address);
   if (mutexAddress) {
@@ -5508,12 +5462,9 @@ Executor::executePThreadMutexUnlock(ExecutionState &state, KInstruction *ki,
   return 0;
 }
 
-/**
- * execute pthread_barrier_init
- */
-unsigned
-Executor::executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
-                                    std::vector<ref<Expr>> &arguments) {
+// execute pthread_barrier_init
+unsigned Executor::executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
+                                             std::vector<ref<Expr>> &arguments) {
   ConstantExpr *barrierAddress = dyn_cast<ConstantExpr>(arguments[0]);
   ConstantExpr *count = dyn_cast<ConstantExpr>(arguments[2]);
   if (!barrierAddress) {
@@ -5522,11 +5473,9 @@ Executor::executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
   if (!count) {
     assert(0 && "count is not const");
   }
-  std::string barrierName =
-      Transfer::uint64toString(barrierAddress->getZExtValue());
+  std::string barrierName = Transfer::uint64toString(barrierAddress->getZExtValue());
   std::string errorMsg;
-  bool isSuccess =
-      state.barrierManager.init(barrierName, count->getZExtValue(), errorMsg);
+  bool isSuccess = state.barrierManager.init(barrierName, count->getZExtValue(), errorMsg);
   if (!isSuccess) {
     llvm::errs() << errorMsg << "\n";
     assert(0 && "barrier init error");
@@ -5534,31 +5483,23 @@ Executor::executePThreadBarrierInit(ExecutionState &state, KInstruction *ki,
   return 0;
 }
 
-/**
- * execute pthread_barrier_wait
- */
-unsigned
-Executor::executePThreadBarrierWait(ExecutionState &state, KInstruction *ki,
-                                    std::vector<ref<Expr>> &arguments) {
+// execute pthread_barrier_wait
+unsigned Executor::executePThreadBarrierWait(ExecutionState &state, KInstruction *ki,
+                                             std::vector<ref<Expr>> &arguments) {
   ConstantExpr *barrierAddress = dyn_cast<ConstantExpr>(arguments[0]);
   if (!barrierAddress) {
     assert(0 && "barrier address is not const");
   }
-  std::string barrierName =
-      Transfer::uint64toString(barrierAddress->getZExtValue());
+  std::string barrierName = Transfer::uint64toString(barrierAddress->getZExtValue());
   std::vector<unsigned> blockedList;
   bool isReleased = false;
   std::string errorMsg;
   bool isSuccess =
-      state.barrierManager.wait(barrierName, state.currentThread->threadId,
-                                isReleased, blockedList, errorMsg);
+      state.barrierManager.wait(barrierName, state.currentThread->threadId, isReleased, blockedList, errorMsg);
   if (isSuccess) {
     if (isReleased) {
       // may be a bottleneck as time complexity is O(n*n)
-      // ylc
-      for (std::vector<unsigned>::iterator ti = blockedList.begin(),
-                                           te = blockedList.end();
-           ti != te; ti++) {
+      for (std::vector<unsigned>::iterator ti = blockedList.begin(), te = blockedList.end(); ti != te; ti++) {
         unsigned threadId = *ti;
         if (threadId != state.currentThread->threadId) {
           state.swapInThread(threadId, true, false);
@@ -5574,23 +5515,16 @@ Executor::executePThreadBarrierWait(ExecutionState &state, KInstruction *ki,
   return 0;
 }
 
-/**
- * execute pthread_barrier_destory
- */
-unsigned
-Executor::executePThreadBarrierDestory(ExecutionState &state, KInstruction *ki,
-                                       std::vector<ref<Expr>> &arguments) {
+// execute pthread_barrier_destory
+unsigned Executor::executePThreadBarrierDestory(ExecutionState &state, KInstruction *ki,
+                                                std::vector<ref<Expr>> &arguments) {
   return 0;
 }
 
-/**
- * handle global mutex, condition and barrier
- *
- */
+// handle global mutex, condition and barrier
 void Executor::handleInitializers(ExecutionState &initialState) {
-  for (Module::const_global_iterator i = kmodule->module->global_begin(),
-                                     e = kmodule->module->global_end();
-       i != e; ++i) {
+  for (Module::const_global_iterator i = kmodule->module->global_begin(), e = kmodule->module->global_end(); i != e;
+       ++i) {
     if (i->hasInitializer() && i->getName().str().at(0) != '.') {
       Type *type = i->getInitializer()->getType();
       ref<ConstantExpr> address = globalAddresses.find(&*i)->second;
@@ -5600,113 +5534,95 @@ void Executor::handleInitializers(ExecutionState &initialState) {
   }
 }
 
-//创建mutex,cond，barrier时可能会重复创建引发断言错误，待修正！
-// ylc
-/**
- * find all mutex, cond and barrier behind startAddress
- * type:
- * startAddress:
- */
-void Executor::createSpecialElement(ExecutionState &state, Type *type,
-                                    uint64_t &startAddress,
-                                    bool isInitializer) {
-
-  //	llvm::errs() << "type : " << type->getTypeID() << "\n";
-  //	llvm::errs() << "startAddress : " << startAddress << "\n";
-
+// 创建mutex,cond，barrier时可能会重复创建引发断言错误，待修正！
+// find all mutex, cond and barrier behind startAddress
+void Executor::createSpecialElement(ExecutionState &state, Type *type, uint64_t &startAddress, bool isInitializer) {
   switch (type->getTypeID()) {
 
-  case Type::IntegerTyID:
-  case Type::FloatTyID:
-  case Type::DoubleTyID: {
-    DataLayout *layout = kmodule->targetData.get();
-    unsigned alignment = layout->getABITypeAlignment(type);
-    if (startAddress % alignment != 0) {
-      startAddress = (startAddress / alignment + 1) * alignment;
-    }
-    startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
-    break;
-  }
-
-  case Type::PointerTyID: {
-    DataLayout *layout = kmodule->targetData.get();
-    unsigned alignment = layout->getABITypeAlignment(type);
-    if (startAddress % alignment != 0) {
-      startAddress = (startAddress / alignment + 1) * alignment;
-    }
-    startAddress += Context::get().getPointerWidth() / 8;
-    break;
-  }
-
-  case Type::ArrayTyID: {
-    unsigned num = type->getArrayNumElements();
-    for (unsigned i = 0; i < num; i++) {
-      Type *elementType = type->getArrayElementType();
-      createSpecialElement(state, elementType, startAddress, isInitializer);
-    }
-    break;
-  }
-
-  case Type::VectorTyID: {
-    unsigned num = type->getVectorNumElements();
-    for (unsigned i = 0; i < num; i++) {
-      Type *elementType = type->getVectorElementType();
-      createSpecialElement(state, elementType, startAddress, isInitializer);
-    }
-    break;
-  }
-
-  case Type::StructTyID: {
-    std::string errorMsg;
-    //			llvm::errs() << "StructName : " << type->getStructName().str() <<
-    //"\n";
-    //下列代码只是为了处理三种特殊结构体的内存对齐，对于复杂对象，其第一个元素在被访问时会计算内存对齐，因此不需要额外对复杂对象计算
-    //内存对齐，这里计算结构体的内存对齐只是因为mutex，cond，barrier三种类型不会被解析，因此需要提前计算。
-    DataLayout *layout = kmodule->targetData.get();
-    //检查是否是opaque结构体，如果是跳过不做处理
-    if (!dyn_cast<StructType>(type)->isOpaque() &&
-        !dyn_cast<StructType>(type)->isLiteral()) {
+    case Type::IntegerTyID:
+    case Type::FloatTyID:
+    case Type::DoubleTyID: {
+      DataLayout *layout = kmodule->targetData.get();
       unsigned alignment = layout->getABITypeAlignment(type);
       if (startAddress % alignment != 0) {
         startAddress = (startAddress / alignment + 1) * alignment;
       }
-      if (type->getStructName() == "union.pthread_mutex_t") {
-        std::string mutexName = Transfer::uint64toString(startAddress);
-        state.mutexManager.addMutex(mutexName, errorMsg);
-        //					llvm::errs() << "mutexName : " <<
-        //mutexName << "\n";
-        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
-      } else if (type->getStructName() == "union.pthread_cond_t") {
-        std::string condName = Transfer::uint64toString(startAddress);
-        if (prefix) {
-          state.condManager.addCondition(condName, errorMsg, prefix);
-        } else {
-          state.condManager.addCondition(condName, errorMsg);
+      startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+      break;
+    }
+
+    case Type::PointerTyID: {
+      DataLayout *layout = kmodule->targetData.get();
+      unsigned alignment = layout->getABITypeAlignment(type);
+      if (startAddress % alignment != 0) {
+        startAddress = (startAddress / alignment + 1) * alignment;
+      }
+      startAddress += Context::get().getPointerWidth() / 8;
+      break;
+    }
+
+    case Type::ArrayTyID: {
+      unsigned num = type->getArrayNumElements();
+      for (unsigned i = 0; i < num; i++) {
+        Type *elementType = type->getArrayElementType();
+        createSpecialElement(state, elementType, startAddress, isInitializer);
+      }
+      break;
+    }
+
+    case Type::VectorTyID: {
+      unsigned num = type->getVectorNumElements();
+      for (unsigned i = 0; i < num; i++) {
+        Type *elementType = type->getVectorElementType();
+        createSpecialElement(state, elementType, startAddress, isInitializer);
+      }
+      break;
+    }
+
+    case Type::StructTyID: {
+      std::string errorMsg;
+      // 下列代码只是为了处理三种特殊结构体的内存对齐，对于复杂对象，其第一个元素在被访问时会计算内存对齐，
+      // 因此不需要额外对复杂对象计算内存对齐，这里计算结构体的内存对齐只是因为mutex，cond，barrier三种类
+      // 型不会被解析，因此需要提前计算。
+      DataLayout *layout = kmodule->targetData.get();
+      // 检查是否是opaque结构体，如果是跳过不做处理
+      if (!dyn_cast<StructType>(type)->isOpaque() && !dyn_cast<StructType>(type)->isLiteral()) {
+        unsigned alignment = layout->getABITypeAlignment(type);
+        if (startAddress % alignment != 0) {
+          startAddress = (startAddress / alignment + 1) * alignment;
         }
-        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
-      } else if (type->getStructName() == "union.pthread_barrier_t") {
-        state.barrierManager.addBarrier(Transfer::uint64toString(startAddress),
-                                        errorMsg);
-        startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
-      } else {
-        unsigned num = type->getStructNumElements();
-        for (unsigned i = 0; i < num; i++) {
-          Type *elementType = type->getStructElementType(i);
-          createSpecialElement(state, elementType, startAddress, isInitializer);
+        if (type->getStructName() == "union.pthread_mutex_t") {
+          std::string mutexName = Transfer::uint64toString(startAddress);
+          state.mutexManager.addMutex(mutexName, errorMsg);
+          // llvm::errs() << "mutexName : " << mutexName << "\n";
+          startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+        } else if (type->getStructName() == "union.pthread_cond_t") {
+          std::string condName = Transfer::uint64toString(startAddress);
+          if (prefix) {
+            state.condManager.addCondition(condName, errorMsg, prefix);
+          } else {
+            state.condManager.addCondition(condName, errorMsg);
+          }
+          startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+        } else if (type->getStructName() == "union.pthread_barrier_t") {
+          state.barrierManager.addBarrier(Transfer::uint64toString(startAddress), errorMsg);
+          startAddress += kmodule->targetData->getTypeSizeInBits(type) / 8;
+        } else {
+          unsigned num = type->getStructNumElements();
+          for (unsigned i = 0; i < num; i++) {
+            Type *elementType = type->getStructElementType(i);
+            createSpecialElement(state, elementType, startAddress, isInitializer);
+          }
         }
       }
+      break;
     }
-    break;
-  }
-
-  case Type::FunctionTyID: {
-    // only met with function pointer, can we skipping it?
-    // ylc
-    break;
-  }
-
-  default: {
-    //			assert(0 && "unsupport initializer type");
-  }
+    case Type::FunctionTyID: {
+      // only met with function pointer, can we skipping it?
+      break;
+    }
+    default: {
+      break;
+    }
   }
 }

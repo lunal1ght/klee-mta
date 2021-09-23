@@ -1,28 +1,25 @@
-/*
- * WaitParam.cpp
- *
- *  Created on: Jul 24, 2014
- *      Author: ylc
- */
+//===-- WaitParam.cpp -------------------------------------------*- C++ -*-===//
+//
+//                     The KLEE Symbolic Virtual Machine
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
 
-#include "WaitParam.h"
+#include "klee/Thread/WaitParam.h"
 
-using namespace::std;
+using namespace ::std;
 
 namespace klee {
 
-WaitParam::WaitParam() {
-	// TODO Auto-generated constructor stub
-
-}
+WaitParam::WaitParam() {}
 
 WaitParam::WaitParam(string mutexName, unsigned threadId) {
-	this->mutexName = mutexName;
-	this->threadId = threadId;
+  this->mutexName = mutexName;
+  this->threadId = threadId;
 }
 
-WaitParam::~WaitParam() {
-	// TODO Auto-generated destructor stub
-}
+WaitParam::~WaitParam() {}
 
-}
+} // namespace klee

@@ -1,168 +1,155 @@
-/*
- * LockScheduler.cpp
- *
- *  Created on: 2015年1月7日
- *      Author: berserker
- */
+//===-- MutexScheduler.cpp --------------------------------------*- C++ -*-===//
+//
+//                     The KLEE Symbolic Virtual Machine
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
 
-#include "MutexScheduler.h"
+#include "klee/Thread/MutexScheduler.h"
 #include <assert.h>
 
-using namespace::std;
+using namespace ::std;
 
 namespace klee {
 
-MutexScheduler* getMutexSchedulerByType(MutexScheduler::MutexSchedulerType type) {
-	MutexScheduler* scheduler;
-	switch (type) {
-	case MutexScheduler::FIFS: {
-		scheduler = new FIFSMutexScheduler();
-		break;
-	}
+MutexScheduler *getMutexSchedulerByType(MutexScheduler::MutexSchedulerType type) {
+  MutexScheduler *scheduler;
+  switch (type) {
+    case MutexScheduler::FIFS: {
+      scheduler = new FIFSMutexScheduler();
+      break;
+    }
 
-	case MutexScheduler::Preemptive: {
-		scheduler = new PreemptiveMutexScheduler();
-		break;
-	}
+    case MutexScheduler::Preemptive: {
+      scheduler = new PreemptiveMutexScheduler();
+      break;
+    }
 
-	case MutexScheduler::Random: {
-		//scheduler = new RandomLockScheduler();
-		break;
-	}
-	default: {
-		scheduler = new FIFSMutexScheduler();
-	}
-
-	}
-	return scheduler;
+    case MutexScheduler::Random: {
+      break;
+    }
+    default: {
+      scheduler = new FIFSMutexScheduler();
+    }
+  }
+  return scheduler;
 }
 
-MutexScheduler::MutexScheduler() {
-	// TODO Auto-generated constructor stub
+MutexScheduler::MutexScheduler() {}
 
-}
+MutexScheduler::~MutexScheduler() {}
 
-MutexScheduler::~MutexScheduler() {
-	// TODO Auto-generated destructor stub
-}
+FIFSMutexScheduler::FIFSMutexScheduler() {}
 
-FIFSMutexScheduler::FIFSMutexScheduler() {
-
-}
-
-FIFSMutexScheduler::~FIFSMutexScheduler() {
-
-}
+FIFSMutexScheduler::~FIFSMutexScheduler() {}
 
 unsigned FIFSMutexScheduler::selectNextItem() {
-	unsigned result = queue.front();
-	queue.pop_front();
-	return result;
+  unsigned result = queue.front();
+  queue.pop_front();
+  return result;
 }
 
-void FIFSMutexScheduler::popAllItem(vector<unsigned>& allItem) {
-	allItem.reserve(queue.size());
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		allItem.push_back(*ii);
-	}
-	queue.clear();
+void FIFSMutexScheduler::popAllItem(vector<unsigned> &allItem) {
+  allItem.reserve(queue.size());
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    allItem.push_back(*ii);
+  }
+  queue.clear();
 }
 
 int FIFSMutexScheduler::itemNum() {
-	return queue.size();
+  return queue.size();
 }
 
 bool FIFSMutexScheduler::isQueueEmpty() {
-	return queue.empty();
+  return queue.empty();
 }
 
 void FIFSMutexScheduler::addItem(unsigned threadId) {
-	queue.push_back(threadId);
+  queue.push_back(threadId);
 }
 
 unsigned FIFSMutexScheduler::removeItem(unsigned threadId) {
-	unsigned result = 0;
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		if (*ii == threadId) {
-			result = *ii;
-			queue.erase(ii);
-			break;
-		}
-	}
-	return result;
+  unsigned result = 0;
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    if (*ii == threadId) {
+      result = *ii;
+      queue.erase(ii);
+      break;
+    }
+  }
+  return result;
 }
 
 void FIFSMutexScheduler::printAllItem(ostream &os) {
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		os << (*ii) << " ";
-	}
-	os << endl;
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    os << (*ii) << " ";
+  }
+  os << endl;
 }
 
-PreemptiveMutexScheduler::PreemptiveMutexScheduler() {
+PreemptiveMutexScheduler::PreemptiveMutexScheduler() {}
 
-}
-
-PreemptiveMutexScheduler::~PreemptiveMutexScheduler() {
-
-}
+PreemptiveMutexScheduler::~PreemptiveMutexScheduler() {}
 
 unsigned PreemptiveMutexScheduler::selectNextItem() {
-	unsigned result = queue.back();
-	queue.pop_back();
-	return result;
+  unsigned result = queue.back();
+  queue.pop_back();
+  return result;
 }
 
-void PreemptiveMutexScheduler::popAllItem(vector<unsigned>& allItem) {
-	allItem.reserve(queue.size());
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		allItem.push_back(*ii);
-	}
-	queue.clear();
+void PreemptiveMutexScheduler::popAllItem(vector<unsigned> &allItem) {
+  allItem.reserve(queue.size());
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    allItem.push_back(*ii);
+  }
+  queue.clear();
 }
 
 int PreemptiveMutexScheduler::itemNum() {
-	return queue.size();
+  return queue.size();
 }
 
 bool PreemptiveMutexScheduler::isQueueEmpty() {
-	return queue.empty();
+  return queue.empty();
 }
 
 void PreemptiveMutexScheduler::addItem(unsigned threadId) {
-	queue.push_back(threadId);
+  queue.push_back(threadId);
 }
 
 unsigned PreemptiveMutexScheduler::removeItem(unsigned threadId) {
-	unsigned result = 0;
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		if (*ii == threadId) {
-			result = *ii;
-			queue.erase(ii);
-			break;
-		}
-	}
-	return result;
+  unsigned result = 0;
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    if (*ii == threadId) {
+      result = *ii;
+      queue.erase(ii);
+      break;
+    }
+  }
+  return result;
 }
 
 void PreemptiveMutexScheduler::printAllItem(ostream &os) {
-	for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
-		os << (*ii) << " ";
-	}
-	os << endl;
+  for (list<unsigned>::iterator ii = queue.begin(), ie = queue.end(); ii != ie; ii++) {
+    os << (*ii) << " ";
+  }
+  os << endl;
 }
 
-//GuidedMutexScheduler::GuidedMutexScheduler(MutexSchedulerType secondarySchedulerType, vector<unsigned>& threadList)
+// GuidedMutexScheduler::GuidedMutexScheduler(MutexSchedulerType secondarySchedulerType, vector<unsigned>& threadList)
 //	:threadList(threadList),
 //	 pos(0) {
 //	baseScheduler = getMutexSchedulerByType(secondarySchedulerType);
 //}
 //
-//GuidedMutexScheduler::~GuidedMutexScheduler() {
+// GuidedMutexScheduler::~GuidedMutexScheduler() {
 //	delete baseScheduler;
 //}
 //
-//unsigned GuidedMutexScheduler::selectNextItem() {
+// unsigned GuidedMutexScheduler::selectNextItem() {
 //	if (pos == threadList.size()) {
 //		return baseScheduler->selectNextItem();
 //	} else {
@@ -173,27 +160,27 @@ void PreemptiveMutexScheduler::printAllItem(ostream &os) {
 //	}
 //}
 //
-//void GuidedMutexScheduler::popAllItem(std::vector<unsigned>& allItem) {
+// void GuidedMutexScheduler::popAllItem(std::vector<unsigned>& allItem) {
 //	baseScheduler->popAllItem(allItem);
 //}
 //
-//int GuidedMutexScheduler::itemNum() {
+// int GuidedMutexScheduler::itemNum() {
 //	return baseScheduler->itemNum();
 //}
 //
-//bool GuidedMutexScheduler::isQueueEmpty() {
+// bool GuidedMutexScheduler::isQueueEmpty() {
 //	return baseScheduler->isQueueEmpty();
 //}
 //
-//void GuidedMutexScheduler::addItem(unsigned threadId) {
+// void GuidedMutexScheduler::addItem(unsigned threadId) {
 //	baseScheduler->addItem(threadId);
 //}
 //
-//unsigned GuidedMutexScheduler::removeItem(unsigned threadId) {
+// unsigned GuidedMutexScheduler::removeItem(unsigned threadId) {
 //	return baseScheduler->removeItem(threadId);
 //}
 //
-//void GuidedMutexScheduler::printAllItem(ostream &os) {
+// void GuidedMutexScheduler::printAllItem(ostream &os) {
 //	baseScheduler->printAllItem(os);
 //}
 
