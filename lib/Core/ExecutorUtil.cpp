@@ -46,7 +46,9 @@ namespace klee {
       if (const ConstantInt *ci = dyn_cast<ConstantInt>(c)) {
         return ConstantExpr::alloc(ci->getValue());
       } else if (const ConstantFP *cf = dyn_cast<ConstantFP>(c)) {
-        return ConstantExpr::alloc(cf->getValueAPF().bitcastToAPInt());
+        ref<Expr> result = ConstantExpr::alloc(cf->getValueAPF().bitcastToAPInt());
+			  result->isFloat = true;
+			  return cast<ConstantExpr>(result);
       } else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c)) {
         auto it = globalAddresses.find(gv);
         assert(it != globalAddresses.end());

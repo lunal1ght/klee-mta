@@ -107,6 +107,14 @@ ObjectState::ObjectState(const MemoryObject *mo, const Array *array)
   memset(concreteStore, 0, size);
 }
 
+ObjectState::ObjectState(unsigned size, const Array *array)
+    : copyOnWriteOwner(0), object(0),
+      concreteStore(new uint8_t[size]), concreteMask(0), flushMask(0),
+      knownSymbolics(0), updates(array, 0), size(size), readOnly(false) {
+  makeSymbolic();
+  memset(concreteStore, 0, size);
+}
+
 ObjectState::ObjectState(const ObjectState &os) 
   : copyOnWriteOwner(0),
     object(os.object),
@@ -114,6 +122,7 @@ ObjectState::ObjectState(const ObjectState &os)
     concreteMask(os.concreteMask ? new BitArray(*os.concreteMask, os.size) : 0),
     flushMask(os.flushMask ? new BitArray(*os.flushMask, os.size) : 0),
     knownSymbolics(0),
+    isTaint(os.isTaint),
     updates(os.updates),
     size(os.size),
     readOnly(false) {
