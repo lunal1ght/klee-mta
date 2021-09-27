@@ -47,7 +47,6 @@ std::string FilterSymbolicExpr::getName(std::string globalName) {
 }
 
 std::string FilterSymbolicExpr::getGlobalName(ref<klee::Expr> value) {
-
   ReadExpr *revalue;
   if (value->getKind() == Expr::Concat) {
     ConcatExpr *ccvalue = cast<ConcatExpr>(value);
@@ -112,54 +111,47 @@ void FilterSymbolicExpr::resolveTaintExpr(ref<klee::Expr> taintExpr, std::vector
   }
 }
 
-void FilterSymbolicExpr::addExprToSet(std::set<std::string> *Expr, std::set<std::string> *relatedSymbolicExpr) {
-
-  for (std::set<std::string>::iterator it = Expr->begin(), ie = Expr->end(); it != ie; ++it) {
-    std::string name = *it;
-    if (relatedSymbolicExpr->find(name) == relatedSymbolicExpr->end()) {
-      relatedSymbolicExpr->insert(name);
+void FilterSymbolicExpr::addExprToSet(const std::set<std::string> &Expr, std::set<std::string> &relatedSymbolicExpr) {
+  for (auto name : Expr) {
+    if (relatedSymbolicExpr.find(name) == relatedSymbolicExpr.end()) {
+      relatedSymbolicExpr.insert(name);
     }
   }
 }
 
-void FilterSymbolicExpr::addExprToVector(std::vector<std::string> *Expr,
-                                         std::vector<std::string> *relatedSymbolicExpr) {
-  for (std::vector<std::string>::iterator it = Expr->begin(), ie = Expr->end(); it != ie; ++it) {
-    std::string nvarName = *it;
+void FilterSymbolicExpr::addExprToVector(const std::vector<std::string> &Expr,
+                                         std::vector<std::string> &relatedSymbolicExpr) {
+  for (auto nvarName : Expr) {
     bool isFind = false;
-    for (std::vector<std::string>::iterator itt = relatedSymbolicExpr->begin(), iee = relatedSymbolicExpr->end();
-         itt != iee; ++itt) {
-      if (*itt == nvarName) {
+    for (auto RSExprVar : relatedSymbolicExpr) {
+      if (RSExprVar == nvarName) {
         isFind = true;
       }
     }
     if (!isFind) {
-      relatedSymbolicExpr->push_back(nvarName);
+      relatedSymbolicExpr.push_back(nvarName);
     }
   }
 }
 
-void FilterSymbolicExpr::addExprToVector(std::set<std::string> *Expr, std::vector<std::string> *relatedSymbolicExpr) {
+void FilterSymbolicExpr::addExprToVector(const std::set<std::string> &Expr,
+                                         std::vector<std::string> &relatedSymbolicExpr) {
 
-  for (std::set<std::string>::iterator it = Expr->begin(), ie = Expr->end(); it != ie; ++it) {
-    std::string varName = *it;
+  for (auto varName : Expr) {
     bool isFind = false;
-    for (std::vector<std::string>::iterator itt = relatedSymbolicExpr->begin(), iee = relatedSymbolicExpr->end();
-         itt != iee; ++itt) {
-      if (*itt == varName) {
+    for (auto RSExprVar : relatedSymbolicExpr) {
+      if (RSExprVar == varName) {
         isFind = true;
       }
     }
     if (!isFind) {
-      relatedSymbolicExpr->push_back(varName);
+      relatedSymbolicExpr.push_back(varName);
     }
   }
 }
 
-void FilterSymbolicExpr::addExprToRelate(std::set<std::string> *Expr) {
-
-  for (std::set<std::string>::iterator it = Expr->begin(), ie = Expr->end(); it != ie; ++it) {
-    std::string name = *it;
+void FilterSymbolicExpr::addExprToRelate(const std::set<std::string> &Exprs) {
+  for (auto name : Exprs) {
     if (allRelatedSymbolicExprSet.find(name) == allRelatedSymbolicExprSet.end()) {
       allRelatedSymbolicExprSet.insert(name);
       allRelatedSymbolicExprVector.push_back(name);
@@ -178,68 +170,62 @@ bool FilterSymbolicExpr::isRelated(std::string varName) {
 void FilterSymbolicExpr::fillterTrace(Trace *trace, std::set<std::string> RelatedSymbolicExpr) {
   std::string name;
 
-  std::vector<ref<klee::Expr>> &pathCondition = trace->pathCondition;
-  std::vector<ref<klee::Expr>> &pathConditionRelatedToBranch = trace->pathConditionRelatedToBranch;
+  const auto &pathCondition = trace->pathCondition;
+  auto &pathConditionRelatedToBranch = trace->pathConditionRelatedToBranch;
   pathConditionRelatedToBranch.clear();
-  for (std::vector<ref<Expr>>::iterator it = pathCondition.begin(), ie = pathCondition.end(); it != ie; ++it) {
-    name = getName(it->get()->getKid(1));
+  for (auto it : pathCondition) {
+    name = getName(it.get()->getKid(1));
     if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      pathConditionRelatedToBranch.push_back(*it);
+      pathConditionRelatedToBranch.push_back(it);
     }
   }
 
-  std::map<std::string, std::vector<Event *>> &readSet = trace->readSet;
-  std::map<std::string, std::vector<Event *>> &readSetRelatedToBranch = trace->readSetRelatedToBranch;
+  const auto &readSet = trace->readSet;
+  auto &readSetRelatedToBranch = trace->readSetRelatedToBranch;
   readSetRelatedToBranch.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = readSet.begin(), nie = readSet.end(); nit != nie;
-       ++nit) {
-    name = nit->first;
+  for (auto nit : readSet) {
+    name = nit.first;
     if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      readSetRelatedToBranch.insert(*nit);
+      readSetRelatedToBranch[nit.first] = nit.second;
     }
   }
 
-  std::map<std::string, std::vector<Event *>> &writeSet = trace->writeSet;
-  std::map<std::string, std::vector<Event *>> &writeSetRelatedToBranch = trace->writeSetRelatedToBranch;
+  const auto &writeSet = trace->writeSet;
+  auto &writeSetRelatedToBranch = trace->writeSetRelatedToBranch;
   writeSetRelatedToBranch.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = writeSet.begin(), nie = writeSet.end(); nit != nie;
-       ++nit) {
-    name = nit->first;
+  for (auto nit : writeSet) {
+    name = nit.first;
     if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      writeSetRelatedToBranch.insert(*nit);
+      writeSetRelatedToBranch[nit.first] = nit.second;
     }
   }
 
-  std::map<std::string, llvm::Constant *> &global_variable_initializer = trace->global_variable_initializer;
-  std::map<std::string, llvm::Constant *> &global_variable_initisalizer_RelatedToBranch =
-      trace->global_variable_initializer_RelatedToBranch;
+  const auto &global_variable_initializer = trace->global_variable_initializer;
+  auto &global_variable_initisalizer_RelatedToBranch = trace->global_variable_initializer_RelatedToBranch;
   global_variable_initisalizer_RelatedToBranch.clear();
-  for (std::map<std::string, llvm::Constant *>::iterator nit = global_variable_initializer.begin(),
-                                                         nie = global_variable_initializer.end();
-       nit != nie; ++nit) {
-    name = nit->first;
+  for (auto nit : global_variable_initializer) {
+    name = nit.first;
     if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      global_variable_initisalizer_RelatedToBranch.insert(*nit);
+      global_variable_initisalizer_RelatedToBranch[nit.first] = nit.second;
     }
   }
 
-  for (std::vector<Event *>::iterator currentEvent = trace->path.begin(), endEvent = trace->path.end();
-       currentEvent != endEvent; currentEvent++) {
-    if ((*currentEvent)->isGlobal == true) {
-      if ((*currentEvent)->inst->inst->getOpcode() == llvm::Instruction::Load ||
-          (*currentEvent)->inst->inst->getOpcode() == llvm::Instruction::Store) {
-        if (RelatedSymbolicExpr.find((*currentEvent)->name) == RelatedSymbolicExpr.end() && OPTIMIZATION1) {
-          (*currentEvent)->isEventRelatedToBranch = false;
-        } else {
-          (*currentEvent)->isEventRelatedToBranch = true;
-        }
+  for (auto currentEvent : trace->path) {
+    if (currentEvent->isGlobal != true) {
+      continue;
+    }
+    if (currentEvent->inst->inst->getOpcode() == llvm::Instruction::Load ||
+        currentEvent->inst->inst->getOpcode() == llvm::Instruction::Store) {
+      if (RelatedSymbolicExpr.find(currentEvent->name) == RelatedSymbolicExpr.end() && OPTIMIZATION1) {
+        currentEvent->isEventRelatedToBranch = false;
+      } else {
+        currentEvent->isEventRelatedToBranch = true;
       }
     }
   }
 }
 
 void FilterSymbolicExpr::filterUseless(Trace *trace) {
-
   std::string name;
   std::vector<std::string> remainingExprName;
   std::vector<ref<klee::Expr>> remainingExpr;
@@ -247,58 +233,55 @@ void FilterSymbolicExpr::filterUseless(Trace *trace) {
   allRelatedSymbolicExprVector.clear();
   remainingExprName.clear();
   remainingExpr.clear();
-  std::vector<ref<klee::Expr>> &storeSymbolicExpr = trace->storeSymbolicExpr;
-  for (std::vector<ref<Expr>>::iterator it = storeSymbolicExpr.begin(), ie = storeSymbolicExpr.end(); it != ie; ++it) {
-    name = getName(it->get()->getKid(1));
+  for (auto it : trace->storeSymbolicExpr) {
+    name = getName(it.get()->getKid(1));
     remainingExprName.push_back(name);
-    remainingExpr.push_back(it->get());
+    remainingExpr.push_back(it.get());
   }
 
-  std::vector<ref<klee::Expr>> &brSymbolicExpr = trace->brSymbolicExpr;
-  std::vector<std::set<std::string> *> &brRelatedSymbolicExpr = trace->brRelatedSymbolicExpr;
-  for (std::vector<ref<Expr>>::iterator it = brSymbolicExpr.begin(), ie = brSymbolicExpr.end(); it != ie; ++it) {
-    std::set<std::string> *tempSymbolicExpr = new std::set<std::string>;
-    resolveSymbolicExpr(it->get(), *tempSymbolicExpr);
+  std::vector<std::set<std::string>> &brRelatedSymbolicExpr = trace->brRelatedSymbolicExpr;
+  for (auto brExpr : trace->brSymbolicExpr) {
+    std::set<std::string> tempSymbolicExpr;
+    resolveSymbolicExpr(brExpr.get(), tempSymbolicExpr);
     brRelatedSymbolicExpr.push_back(tempSymbolicExpr);
     addExprToRelate(tempSymbolicExpr);
   }
 
-  std::vector<ref<klee::Expr>> &assertSymbolicExpr = trace->assertSymbolicExpr;
-  std::vector<std::set<std::string> *> &assertRelatedSymbolicExpr = trace->assertRelatedSymbolicExpr;
-  for (std::vector<ref<Expr>>::iterator it = assertSymbolicExpr.begin(), ie = assertSymbolicExpr.end(); it != ie;
-       ++it) {
-    std::set<std::string> *tempSymbolicExpr = new std::set<std::string>;
-    resolveSymbolicExpr(it->get(), *tempSymbolicExpr);
+  std::vector<std::set<std::string>> &assertRelatedSymbolicExpr = trace->assertRelatedSymbolicExpr;
+  for (auto assertExpr : trace->assertSymbolicExpr) {
+    std::set<std::string> tempSymbolicExpr;
+    resolveSymbolicExpr(assertExpr.get(), tempSymbolicExpr);
     assertRelatedSymbolicExpr.push_back(tempSymbolicExpr);
     addExprToRelate(tempSymbolicExpr);
   }
 
   std::vector<ref<klee::Expr>> &pathCondition = trace->pathCondition;
-  std::map<std::string, std::set<std::string> *> &varRelatedSymbolicExpr = trace->allRelatedSymbolicExpr;
-  for (std::vector<std::string>::iterator nit = allRelatedSymbolicExprVector.begin();
-       nit != allRelatedSymbolicExprVector.end(); ++nit) {
-    name = *nit;
+  auto &varRelatedSymbolicExpr = trace->allRelatedSymbolicExprs;
+
+  for (auto name : allRelatedSymbolicExprVector) {
 #if FILTER_DEBUG
     llvm::errs() << "allRelatedSymbolicExprSet name : " << name << "\n";
 #endif
+    if (remainingExpr.empty())
+      break;
     std::vector<ref<Expr>>::iterator itt = remainingExpr.begin();
-    for (std::vector<std::string>::iterator it = remainingExprName.begin(), ie = remainingExprName.end(); it != ie;) {
+    std::vector<std::string>::iterator it = remainingExprName.begin();
+    for (; it != remainingExprName.end();) {
       if (name == *it) {
-        remainingExprName.erase(it);
-        --ie;
+        it = remainingExprName.erase(it);
         pathCondition.push_back(*itt);
 #if FILTER_DEBUG
         llvm::errs() << *itt << "\n";
 #endif
-        std::set<std::string> *tempSymbolicExpr = new std::set<std::string>;
-        resolveSymbolicExpr(*itt, *tempSymbolicExpr);
+        std::set<std::string> tempSymbolicExpr;
+        resolveSymbolicExpr(*itt, tempSymbolicExpr);
         if (varRelatedSymbolicExpr.find(name) != varRelatedSymbolicExpr.end()) {
           addExprToSet(tempSymbolicExpr, varRelatedSymbolicExpr[name]);
         } else {
           varRelatedSymbolicExpr[name] = tempSymbolicExpr;
         }
         addExprToRelate(tempSymbolicExpr);
-        remainingExpr.erase(itt);
+        itt = remainingExpr.erase(itt);
       } else {
         ++it;
         ++itt;
@@ -319,67 +302,65 @@ void FilterSymbolicExpr::filterUseless(Trace *trace) {
 
   std::map<std::string, std::vector<Event *>> usefulReadSet;
   std::map<std::string, std::vector<Event *>> &readSet = trace->readSet;
-  std::map<std::string, std::vector<Event *>> &allReadSet = trace->allReadSet;
-  usefulReadSet.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = readSet.begin(), nie = readSet.end(); nit != nie;
-       ++nit) {
-    allReadSet.insert(*nit);
-    name = nit->first;
-    if (isRelated(name) || !OPTIMIZATION1) {
-      usefulReadSet.insert(*nit);
-      if (varThread.find(name) == varThread.end()) {
-        varThread[name] = (*(nit->second.begin()))->threadId;
+  for (auto oneVarReads : readSet) {
+    trace->allReadSet.insert(oneVarReads);
+    name = oneVarReads.first;
+    if (!isRelated(name) && OPTIMIZATION1) {
+      continue;
+    }
+    usefulReadSet.insert(oneVarReads);
+    if (varThread.find(name) == varThread.end()) {
+      varThread[name] = (*(oneVarReads.second.begin()))->threadId;
+    }
+    long id = varThread[name];
+    if (id == 0) {
+      continue;
+    }
+    for (auto read : oneVarReads.second) {
+      if (id == read->threadId) {
+        continue;
       }
-      long id = varThread[name];
-      if (id != 0) {
-        for (std::vector<Event *>::iterator it = nit->second.begin(), ie = nit->second.end(); it != ie; ++it) {
-          if (id != (*it)->threadId) {
-            varThread[name] = 0;
-            break;
-          }
-        }
-      }
+      varThread[name] = 0;
+      break;
     }
   }
   readSet.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = usefulReadSet.begin(), nie = usefulReadSet.end();
-       nit != nie; ++nit) {
-    readSet.insert(*nit);
+  for (auto UR : usefulReadSet) {
+    readSet.insert(UR);
   }
 
   std::map<std::string, std::vector<Event *>> usefulWriteSet;
   std::map<std::string, std::vector<Event *>> &writeSet = trace->writeSet;
   std::map<std::string, std::vector<Event *>> &allWriteSet = trace->allWriteSet;
   usefulWriteSet.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = writeSet.begin(), nie = writeSet.end(); nit != nie;
-       ++nit) {
-    allWriteSet.insert(*nit);
-    name = nit->first;
+  for (auto oneVarWrites : writeSet) {
+    allWriteSet.insert(oneVarWrites);
+    name = oneVarWrites.first;
     if (isRelated(name) || !OPTIMIZATION1) {
-      usefulWriteSet.insert(*nit);
+      usefulWriteSet.insert(oneVarWrites);
       if (varThread.find(name) == varThread.end()) {
-        varThread[name] = (*(nit->second.begin()))->threadId;
+        varThread[name] = (*(oneVarWrites.second.begin()))->threadId;
       }
       long id = varThread[name];
-      if (id != 0) {
-        for (std::vector<Event *>::iterator it = nit->second.begin(), ie = nit->second.end(); it != ie; ++it) {
-          if (id != (*it)->threadId) {
-            varThread[name] = 0;
-            break;
-          }
+      if (id == 0) {
+        continue;
+      }
+      for (auto write : oneVarWrites.second) {
+        if (id != write->threadId) {
+          varThread[name] = 0;
+          break;
         }
       }
     }
   }
   writeSet.clear();
-  for (std::map<std::string, std::vector<Event *>>::iterator nit = usefulWriteSet.begin(), nie = usefulWriteSet.end();
-       nit != nie; ++nit) {
-    writeSet.insert(*nit);
+  for (auto UW : usefulWriteSet) {
+    writeSet.insert(UW);
   }
 
-  for (std::map<std::string, long>::iterator nit = varThread.begin(), nie = varThread.end(); nit != nie; ++nit) {
-    if (usefulWriteSet.find((*nit).first) == usefulWriteSet.end()) {
-      (*nit).second = -1;
+  for (auto vt : varThread) {
+    if (usefulWriteSet.find(vt.first) == usefulWriteSet.end()) {
+      vt.second = -1;
     }
   }
 
@@ -394,19 +375,15 @@ void FilterSymbolicExpr::filterUseless(Trace *trace) {
   }
 #endif
   usefulGlobal_variable_initializer.clear();
-  for (std::map<std::string, llvm::Constant *>::iterator nit = global_variable_initializer.begin(),
-                                                         nie = global_variable_initializer.end();
-       nit != nie; ++nit) {
-    name = nit->first;
+  for (auto G : global_variable_initializer) {
+    name = G.first;
     if (isRelated(name) || !OPTIMIZATION1) {
-      usefulGlobal_variable_initializer.insert(*nit);
+      usefulGlobal_variable_initializer.insert(G);
     }
   }
   global_variable_initializer.clear();
-  for (std::map<std::string, llvm::Constant *>::iterator nit = usefulGlobal_variable_initializer.begin(),
-                                                         nie = usefulGlobal_variable_initializer.end();
-       nit != nie; ++nit) {
-    global_variable_initializer.insert(*nit);
+  for (auto UG : usefulGlobal_variable_initializer) {
+    global_variable_initializer.insert(UG);
   }
 #if FILTER_DEBUG
   llvm::errs() << "global_variable_initializer = " << trace->global_variable_initializer.size() << "\n";
@@ -416,60 +393,53 @@ void FilterSymbolicExpr::filterUseless(Trace *trace) {
     llvm::errs() << it->first << "\n";
   }
 #endif
-  for (std::vector<Event *>::iterator currentEvent = trace->path.begin(), endEvent = trace->path.end();
-       currentEvent != endEvent; currentEvent++) {
-    if ((*currentEvent)->isGlobal == true) {
-      if ((*currentEvent)->inst->inst->getOpcode() == llvm::Instruction::Load ||
-          (*currentEvent)->inst->inst->getOpcode() == llvm::Instruction::Store) {
-        if (isRelated((*currentEvent)->name) && OPTIMIZATION1) {
-          (*currentEvent)->isEventRelatedToBranch = false;
+  for (auto currentEvent : trace->path) {
+    if (currentEvent->isGlobal == true) {
+      if (currentEvent->inst->inst->getOpcode() == llvm::Instruction::Load ||
+          currentEvent->inst->inst->getOpcode() == llvm::Instruction::Store) {
+        if (isRelated(currentEvent->name) && OPTIMIZATION1) {
+          currentEvent->isEventRelatedToBranch = false;
         } else {
-          (*currentEvent)->isEventRelatedToBranch = true;
+          currentEvent->isEventRelatedToBranch = true;
         }
       } else {
-        (*currentEvent)->isEventRelatedToBranch = true;
+        currentEvent->isEventRelatedToBranch = true;
       }
     }
   }
 
   std::vector<ref<klee::Expr>> rwSymbolicExprRelatedToBranch;
   std::vector<ref<klee::Expr>> &rwSymbolicExpr = trace->rwSymbolicExpr;
-  for (std::vector<ref<klee::Expr>>::iterator nit = rwSymbolicExpr.begin(), nie = rwSymbolicExpr.end(); nit != nie;
-       ++nit) {
-    name = getName((*nit)->getKid(1));
+  for (auto rwExpr : rwSymbolicExpr) {
+    name = getName(rwExpr->getKid(1));
     if (isRelated(name) || !OPTIMIZATION1) {
-      rwSymbolicExprRelatedToBranch.push_back(*nit);
+      rwSymbolicExprRelatedToBranch.push_back(rwExpr);
     }
   }
   rwSymbolicExpr.clear();
-  for (std::vector<ref<klee::Expr>>::iterator nit = rwSymbolicExprRelatedToBranch.begin(),
-                                              nie = rwSymbolicExprRelatedToBranch.end();
-       nit != nie; ++nit) {
-    rwSymbolicExpr.push_back(*nit);
+  for (auto rwExprBr : rwSymbolicExprRelatedToBranch) {
+    rwSymbolicExpr.push_back(rwExprBr);
   }
 
   fillterTrace(trace, allRelatedSymbolicExprSet);
 }
 
-bool FilterSymbolicExpr::filterUselessWithSet(Trace *trace, std::set<std::string> *relatedSymbolicExpr) {
+bool FilterSymbolicExpr::filterUselessWithSet(Trace *trace, std::set<std::string> &relatedSymbolicExpr) {
   std::set<std::string> &RelatedSymbolicExpr = trace->RelatedSymbolicExpr;
   RelatedSymbolicExpr.clear();
-  addExprToSet(relatedSymbolicExpr, &RelatedSymbolicExpr);
+  addExprToSet(relatedSymbolicExpr, RelatedSymbolicExpr);
 
-  std::string name;
-  std::map<std::string, std::set<std::string> *> &allRelatedSymbolicExpr = trace->allRelatedSymbolicExpr;
-  for (std::set<std::string>::iterator nit = RelatedSymbolicExpr.begin(); nit != RelatedSymbolicExpr.end(); ++nit) {
-    name = *nit;
+  std::map<std::string, std::set<std::string>> &allRelatedSymbolicExpr = trace->allRelatedSymbolicExprs;
+  for (auto name : RelatedSymbolicExpr) {
     if (allRelatedSymbolicExpr.find(name) != allRelatedSymbolicExpr.end()) {
-      addExprToSet(allRelatedSymbolicExpr[name], &RelatedSymbolicExpr);
+      addExprToSet(allRelatedSymbolicExpr[name], RelatedSymbolicExpr);
     }
   }
 
   bool branch = false;
   std::map<std::string, long> &varThread = trace->varThread;
-  for (std::set<std::string>::iterator it = RelatedSymbolicExpr.begin(), ie = RelatedSymbolicExpr.end(); it != ie;
-       ++it) {
-    if (varThread[*it] == 0) {
+  for (auto name : RelatedSymbolicExpr) {
+    if (varThread[name] == 0) {
       branch = true;
       break;
     }
@@ -486,25 +456,21 @@ void FilterSymbolicExpr::filterUselessByTaint(Trace *trace) {
 
   std::set<std::string> &taintSymbolicExpr = trace->taintSymbolicExpr;
   std::vector<std::string> taint;
-  for (std::set<std::string>::iterator it = taintSymbolicExpr.begin(), ie = taintSymbolicExpr.end(); it != ie; it++) {
-    taint.push_back(*it);
+  for (auto taintExpr : taintSymbolicExpr) {
+    taint.push_back(taintExpr);
   }
 
-  std::set<std::string> &unTaintSymbolicExpr = trace->unTaintSymbolicExpr;
   std::vector<std::string> unTaint;
-  for (std::set<std::string>::iterator it = unTaintSymbolicExpr.begin(), ie = unTaintSymbolicExpr.end(); it != ie;
-       it++) {
-    unTaint.push_back(*it);
+  for (auto unTaintExpr : trace->unTaintSymbolicExpr) {
+    unTaint.push_back(unTaintExpr);
   }
 
-  std::string name;
-  std::map<std::string, std::set<std::string> *> &allRelatedSymbolicExpr = trace->allRelatedSymbolicExpr;
-  for (std::vector<std::string>::iterator it = taint.begin(); it != taint.end(); it++) {
-    name = *it;
+  std::map<std::string, std::set<std::string>> &allRelatedSymbolicExpr = trace->allRelatedSymbolicExprs;
+  for (auto name : taint) {
     for (std::vector<std::string>::iterator itt = unTaint.begin(); itt != unTaint.end();) {
       if (allRelatedSymbolicExpr.find(*itt) == allRelatedSymbolicExpr.end()) {
         itt++;
-      } else if (allRelatedSymbolicExpr[*itt]->find(name) != allRelatedSymbolicExpr[*itt]->end()) {
+      } else if (allRelatedSymbolicExpr[*itt].find(name) != allRelatedSymbolicExpr[*itt].end()) {
         taint.push_back(*itt);
         unTaint.erase(itt);
       } else {
@@ -514,8 +480,7 @@ void FilterSymbolicExpr::filterUselessByTaint(Trace *trace) {
   }
 
   std::set<std::string> &potentialTaintSymbolicExpr = trace->potentialTaint;
-  for (std::vector<std::string>::iterator it = taint.begin(), ie = taint.end(); it != ie; it++) {
-    name = *it;
+  for (auto name : taint) {
     if (taintSymbolicExpr.find(name) == taintSymbolicExpr.end()) {
       potentialTaintSymbolicExpr.insert(name);
     }

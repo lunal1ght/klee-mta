@@ -611,7 +611,6 @@ void ListenerService::endControl(Executor *executor) {
   rdManager.printCurrentTrace(true);
   //			encode.showInitTrace();//need to be modified
 #endif
-  unsigned traceNum = executor->executionNum;
   if (executor->execStatus != Executor::SUCCESS) {
     llvm::errs() << "######################执行有错误,放弃本次执行##############\n";
     executor->isFinished = true;
@@ -625,17 +624,13 @@ void ListenerService::endControl(Executor *executor) {
     Trace *trace = rdManager.getCurrentTrace();
 
     unsigned allGlobal = 0;
-    std::map<std::string, std::vector<Event *>> &writeSet = trace->writeSet;
-    std::map<std::string, std::vector<Event *>> &readSet = trace->readSet;
-    for (std::map<std::string, std::vector<Event *>>::iterator nit = readSet.begin(), nie = readSet.end(); nit != nie;
-         ++nit) {
-      allGlobal += nit->second.size();
+    for (auto read : trace->readSet) {
+      allGlobal += read.second.size();
     }
-    for (std::map<std::string, std::vector<Event *>>::iterator nit = writeSet.begin(), nie = writeSet.end(); nit != nie;
-         ++nit) {
-      std::string varName = nit->first;
+    for (auto write : trace->writeSet) {
+      std::string varName = write.first;
       if (trace->readSet.find(varName) == trace->readSet.end()) {
-        allGlobal += nit->second.size();
+        allGlobal += write.second.size();
       }
     }
     rdManager.allGlobal += allGlobal;
@@ -648,20 +643,18 @@ void ListenerService::endControl(Executor *executor) {
     gettimeofday(&start, NULL);
     encode = new Encode(&rdManager);
     encode->buildifAndassert();
-    if (encode->verify()) {
-      encode->check_if();
-    }
+    encode->check_if();
     gettimeofday(&finish, NULL);
     cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
     rdManager.solvingCost += cost;
 
-    gettimeofday(&start, NULL);
-    dtam = new DTAM(&rdManager);
-    dtam->dtam();
-    gettimeofday(&finish, NULL);
-    cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-    rdManager.DTAMCost += cost;
-    rdManager.allDTAMCost.push_back(cost);
+    // gettimeofday(&start, NULL);
+    // dtam = new DTAM(&rdManager);
+    // dtam->dtam();
+    // gettimeofday(&finish, NULL);
+    // cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
+    // rdManager.DTAMCost += cost;
+    // rdManager.allDTAMCost.push_back(cost);
 
     gettimeofday(&start, NULL);
     encode->PTS();
@@ -674,18 +667,15 @@ void ListenerService::endControl(Executor *executor) {
     size = trace->Send_Data_Expr.size();
     rdManager.Send_Data.push_back(size);
     size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMSerial.find(*it) != trace->DTAMSerial.end()) {
+    for (auto send : trace->Send_Data_Expr) {
+      if (trace->DTAMSerial.find(send) != trace->DTAMSerial.end()) {
         size++;
       };
     }
     rdManager.Send_Data_Serial.push_back(size);
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      for (std::vector<std::string>::iterator itt = trace->taintPTS.begin(), iee = trace->taintPTS.end(); itt != iee;
-           itt++) {
-        if ((*itt) == (*it)) {
+    for (auto send : trace->Send_Data_Expr) {
+      for (auto pts : trace->taintPTS) {
+        if (pts == send) {
           size++;
         };
       }
@@ -693,18 +683,16 @@ void ListenerService::endControl(Executor *executor) {
     rdManager.Send_Data_PTS.push_back(size);
 
     size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMParallel.find(*it) != trace->DTAMParallel.end()) {
+    for (auto send : trace->Send_Data_Expr) {
+      if (trace->DTAMParallel.find(send) != trace->DTAMParallel.end()) {
         size++;
       };
     }
     rdManager.Send_Data_Parallel.push_back(size);
 
     size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMhybrid.find(*it) != trace->DTAMhybrid.end()) {
+    for (auto send : trace->Send_Data_Expr) {
+      if (trace->DTAMhybrid.find(send) != trace->DTAMhybrid.end()) {
         size++;
       };
     }
@@ -716,15 +704,13 @@ void ListenerService::endControl(Executor *executor) {
 
   executor->getNewPrefix();
 
-  for (std::vector<BitcodeListener *>::iterator bit = bitcodeListeners.begin(), bie = bitcodeListeners.end();
-       bit != bie; ++bit) {
-    //			delete *bit;
+  while(!bitcodeListeners.empty()) {
     bitcodeListeners.pop_back();
   }
 
-  if (executor->executionNum >= 70) {
-    executor->isFinished = true;
-  }
+  // if (executor->executionNum >= 70) {
+  //   executor->isFinished = true;
+  // }
 }
 
 } // namespace klee

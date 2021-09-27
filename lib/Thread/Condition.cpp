@@ -37,10 +37,12 @@ WaitParam *Condition::signal() {
   }
 }
 
-void Condition::broadcast(vector<WaitParam *> &allWait) { waitingList->popAllItem(allWait); }
+void Condition::broadcast(vector<WaitParam *> &allWait) { 
+  waitingList->popAllItem(allWait); 
+}
 
 Condition::~Condition() {
-  // release unsignal thread
+  // release unsignaled thread
   if (!waitingList->isQueueEmpty()) {
     vector<WaitParam *> allItem;
     waitingList->popAllItem(allItem);

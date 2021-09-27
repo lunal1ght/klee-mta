@@ -50,8 +50,8 @@ RuntimeDataManager::RuntimeDataManager() : currentTrace(NULL) {
 }
 
 RuntimeDataManager::~RuntimeDataManager() {
-  for (vector<Trace *>::iterator ti = traceList.begin(), te = traceList.end(); ti != te; ti++) {
-    delete *ti;
+  for (auto trace : traceList) {
+    delete trace;
   }
   auto err = std::error_code();
   raw_fd_ostream out_to_file("./output_info/statics.txt", err, sys::fs::F_Append);
@@ -167,7 +167,7 @@ Trace *RuntimeDataManager::getCurrentTrace() {
   return currentTrace;
 }
 
-void RuntimeDataManager::addScheduleSet(Prefix *prefix) {
+void RuntimeDataManager::addToScheduleSet(Prefix *prefix) {
   scheduleSet.push_back(prefix);
 }
 

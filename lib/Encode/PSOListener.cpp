@@ -41,10 +41,9 @@ PSOListener::PSOListener(Executor *executor, RuntimeDataManager *rdManager)
 }
 
 PSOListener::~PSOListener() {
-  for (map<uint64_t, BarrierInfo *>::iterator bri = barrierRecord.begin(), bre = barrierRecord.end(); bri != bre;
-       bri++) {
-    if (bri->second) {
-      delete bri->second;
+  for (auto bri : barrierRecord) {
+    if (bri.second) {
+      delete bri.second;
     }
   }
 }

@@ -32,36 +32,19 @@ namespace klee {
 Trace::Trace() : Id(0), nextEventId(0), eventList(20), isUntested(true) {}
 
 Trace::~Trace() {
-  for (vector<Event *>::iterator ti = path.begin(), te = path.end(); ti != te; ti++) {
-    delete *ti;
+  for (auto event : path) {
+    delete event;
   }
-  for (map<string, vector<LockPair *>>::iterator li = all_lock_unlock.begin(), le = all_lock_unlock.end(); li != le;
-       li++) {
-    for (vector<LockPair *>::iterator ei = li->second.begin(), ee = li->second.end(); ei != ee; ei++) {
-      delete *ei;
+  for (auto li : all_lock_unlock) {
+    for (auto ei : li.second) {
+      delete ei;
     }
   }
-  for (map<string, vector<Wait_Lock *>>::iterator wi = all_wait.begin(), we = all_wait.end(); wi != we; wi++) {
-    for (vector<Wait_Lock *>::iterator ei = wi->second.begin(), ee = wi->second.end(); ei != ee; ei++) {
-      delete *ei;
+  for (auto wi : all_wait) {
+    for (auto ei : wi.second) {
+      delete ei;
     }
   }
-  // overlook some event, alloca event only exist in trace!
-  //	for (vector<vector<Event*>*>::iterator evi = eventList.begin(), eve =
-  //			eventList.end(); evi != eve; evi++) {
-  //		if (*evi) {
-  //			for (vector<Event*>::iterator ei = (*evi)->begin(), ee =
-  //					(*evi)->end(); ei != ee; ei++) {
-  //				delete *ei;
-  //			}
-  //			delete *evi;
-  //		}
-  //	}
-
-  //	for (map<string, Constant*>::iterator pi = printf_variable_value.begin(), pe = printf_variable_value.end(); pi
-  //!= pe; pi++) { 		if (pi->second != NULL) { 			delete pi->second;
-  //		}
-  //	}
 }
 
 void Trace::print(bool file) {
@@ -96,14 +79,12 @@ void Trace::print(bool file) {
 
 void Trace::printAllEvent(raw_ostream &out) {
   int threadId = 0;
-  for (vector<vector<Event *> *>::iterator evi = eventList.begin(), eve = eventList.end(); evi != eve; evi++) {
-    vector<Event *> *item = *evi;
-    if (item) {
-      out << "/*********Thread: " << threadId << "**********/\n";
-      for (vector<Event *>::iterator ei = item->begin(), ee = item->end(); ei != ee; ei++) {
-        Event *event = *ei;
-        out << event->toString() << "\n";
-      }
+  for (auto thread : eventList) {
+    if (thread.empty())
+      continue;
+    out << "/*********Thread: " << threadId << "**********/\n";
+    for (auto event : thread) {
+      out << event->toString() << "\n";
     }
     threadId++;
   }
@@ -212,16 +193,11 @@ void Trace::printGlobalVariableInitializer(raw_ostream &out) {
 }
 
 void Trace::insertEvent(Event *event, unsigned threadId) {
-  // cerr << threadId << " " << eventList.size() << endl;
   while (eventList.size() <= threadId) {
-    eventList.resize(2 * eventList.size(), NULL);
+    eventList.resize(2 * eventList.size(), {});
   }
-  if (!eventList[threadId]) {
-    eventList[threadId] = new vector<Event *>();
-    // std::cerr << "create eventList id : " << threadId << "\n";
-  }
-  eventList[threadId]->push_back(event);
-  event->threadEventId = eventList[threadId]->size();
+  eventList[threadId].push_back(event);
+  event->threadEventId = eventList[threadId].size();
 }
 
 Event *Trace::createEvent(unsigned threadId, KInstruction *inst, uint64_t address, bool isLoad, int time,
@@ -371,15 +347,15 @@ void Trace::insertPath(Event *event) { path.push_back(event); }
 void Trace::createAbstract() {
   //	std::cerr << "createAbstract\n" ;
   for (unsigned tid = 0; tid < this->eventList.size(); tid++) {
-    std::vector<Event *> *thread = this->eventList[tid];
-    if (thread == NULL) // A bug introduced by lcyu
+    std::vector<Event *> &thread = this->eventList[tid];
+    if (thread.empty()) // A bug introduced by lcyu
       continue;
     stringstream ss;
-    string fn = thread->at(0)->inst->inst->getParent()->getParent()->getName().data();
+    string fn = thread.at(0)->inst->inst->getParent()->getParent()->getName().data();
     ss << fn << ":";
     //		std::cerr << fn << "\n";
-    for (unsigned i = 0; i < thread->size(); i++) {
-      Event *event = thread->at(i);
+    for (unsigned i = 0; i < thread.size(); i++) {
+      Event *event = thread.at(i);
       if (event->isConditionInst) {
         // std::cerr << "condition : " << event->condition << " ";
         // event->inst->inst->dump();

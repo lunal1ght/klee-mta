@@ -51,7 +51,7 @@ public:
   unsigned Id;
   unsigned nextEventId;
   // all event, sorted by threadId and event Id
-  std::vector<std::vector<Event *> *> eventList;
+  std::vector<std::vector<Event *>> eventList;
   std::vector<std::string> abstract;
   std::stringstream ss;
   // original execution trace
@@ -68,10 +68,10 @@ public:
   std::vector<ref<klee::Expr>> assertSymbolicExpr;
   std::vector<ref<klee::Expr>> pathCondition;
   std::vector<ref<klee::Expr>> pathConditionRelatedToBranch;
-  std::vector<std::set<std::string> *> brRelatedSymbolicExpr;
-  std::vector<std::set<std::string> *> assertRelatedSymbolicExpr;
+  std::vector<std::set<std::string>> brRelatedSymbolicExpr;
+  std::vector<std::set<std::string>> assertRelatedSymbolicExpr;
   std::set<std::string> RelatedSymbolicExpr;
-  std::map<std::string, std::set<std::string> *> allRelatedSymbolicExpr;
+  std::map<std::string, std::set<std::string>> allRelatedSymbolicExprs;
   std::map<std::string, long> varThread;
   std::vector<Event *> rwEvent;
   std::vector<Event *> brEvent;
