@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+using namespace llvm;
 namespace klee {
 
 // added by xdzhang
@@ -112,6 +113,7 @@ public:
   void insertArgc(int argc);
   void insertReadSet(std::string name, Event *item);
   void insertWriteSet(std::string name, Event *item);
+  // This function is deprecated, should remove it later.
   Event *createEvent(unsigned threadId, KInstruction *inst, uint64_t address, bool isLoad, int time,
                      Event::EventType eventType);
   Event *createEvent(unsigned threadId, KInstruction *inst, Event::EventType eventType);
@@ -125,10 +127,9 @@ public:
   void printPrintfParam(llvm::raw_ostream &out);
   void printGlobalVariableLast(llvm::raw_ostream &out);
   void printGlobalVariableInitializer(llvm::raw_ostream &out);
-  void print(bool file);
+  void printExecutionPath(raw_ostream &out);
+  void printDetailedInfo(raw_ostream &out);
 
-  // bool operator==(Trace* another);
-  // void calculateAccessVector(std::vector<Event*>& prefix);
   void createAbstract();
   bool isEqual(Trace *trace);
 

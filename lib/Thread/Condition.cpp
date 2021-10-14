@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Condition.h"
+#include "klee/Thread/Condition.h"
 
 #include <iterator>
 

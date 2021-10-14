@@ -31,6 +31,7 @@
 #include "klee/Encode/SymbolicListener.h"
 #include "klee/Encode/TaintListener.h"
 #include "klee/Thread/StackType.h"
+#include "klee/Config/DebugMacro.h"
 
 extern void *__dso_handle __attribute__((__weak__));
 
@@ -42,7 +43,11 @@ ListenerService::ListenerService(Executor *executor) {
   cost = 0;
 }
 
-ListenerService::~ListenerService() {}
+ListenerService::~ListenerService() {
+  for (auto listener : bitcodeListeners) {
+    delete listener;
+  }
+}
 
 void ListenerService::pushListener(BitcodeListener *bitcodeListener) { bitcodeListeners.push_back(bitcodeListener); }
 
@@ -181,29 +186,26 @@ void ListenerService::beforeExecuteInstruction(Executor *executor, ExecutionStat
       }
       if (func->getName().contains("llvm.dbg.declare"))
         break;
-      std::vector<BitcodeListener *>::iterator bit = bitcodeListeners.begin(), bie = bitcodeListeners.end();
-      for (; bit != bie; ++bit) {
-        state.currentStack = (*bit)->stack[state.currentThread->threadId];
-
-        (*bit)->arguments.reserve(numArgs);
+      for (auto listener : bitcodeListeners) {
+        state.currentStack = listener->stack[state.currentThread->threadId];
+        listener->arguments.reserve(numArgs);
         for (unsigned j = 0; j < numArgs; ++j) {
-          (*bit)->arguments.push_back(executor->eval(ki, j + 1, state).value);
+          listener->arguments.push_back(executor->eval(ki, j + 1, state).value);
         }
         const FunctionType *fType = dyn_cast<FunctionType>(cast<PointerType>(func->getType())->getElementType());
         const FunctionType *fpType = dyn_cast<FunctionType>(cast<PointerType>(fp->getType())->getElementType());
         if (fType != fpType) {
           unsigned i = 0;
-          std::vector<ref<Expr>>::iterator ai = (*bit)->arguments.begin(), ie = (*bit)->arguments.end();
-          for (; ai != ie; ++ai) {
-            Expr::Width to, from = (*ai)->getWidth();
+          for (auto arg : listener->arguments) {
+            Expr::Width to, from = arg->getWidth();
             if (i < fType->getNumParams()) {
               to = executor->getWidthForLLVMType(fType->getParamType(i));
               if (from != to) {
                 bool isSExt = cs.paramHasAttr(i + 1, llvm::Attribute::SExt);
                 if (isSExt) {
-                  (*bit)->arguments[i] = SExtExpr::create((*bit)->arguments[i], to);
+                  listener->arguments[i] = SExtExpr::create(listener->arguments[i], to);
                 } else {
-                  (*bit)->arguments[i] = ZExtExpr::create((*bit)->arguments[i], to);
+                  listener->arguments[i] = ZExtExpr::create(listener->arguments[i], to);
                 }
               }
             }
@@ -219,21 +221,21 @@ void ListenerService::beforeExecuteInstruction(Executor *executor, ExecutionStat
               StackFrame &sf = state.currentStack->realStack.back();
               Expr::Width WordSize = Context::get().getPointerWidth();
               if (WordSize == Expr::Int32) {
-                executor->executeMemoryOperation(state, true, (*bit)->arguments[0], sf.varargs->getBaseExpr(), 0);
+                executor->executeMemoryOperation(state, true, listener->arguments[0], sf.varargs->getBaseExpr(), 0);
               } else {
                 // gp_offset
-                executor->executeMemoryOperation(state, true, (*bit)->arguments[0], ConstantExpr::create(48, 32), 0);
+                executor->executeMemoryOperation(state, true, listener->arguments[0], ConstantExpr::create(48, 32), 0);
                 // fp_offset
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(4, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(4, 64)),
                                                  ConstantExpr::create(304, 32), 0);
                 // overflow_arg_area
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(8, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(8, 64)),
                                                  sf.varargs->getBaseExpr(), 0);
                 // reg_save_area
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(16, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(16, 64)),
                                                  ConstantExpr::create(0, 64), 0);
               }
               break;
@@ -288,10 +290,7 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
         if (state.currentStack->realStack.size() <= 1) {
 
         } else {
-          //						llvm::errs() << "
-          // state.currentStack->popFrame();state.currentStack->popFrame(); : " << "\n";
           state.currentStack->popFrame();
-          //						llvm::errs() << " state.currentStack->popFrame(); : " << "\n";
           if (!isVoidReturn) {
             Type *t = caller->getType();
             if (t != Type::getVoidTy(i->getContext())) {
@@ -350,10 +349,6 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                     ref<Expr> offset = mo->getOffsetExpr(address);
                     const ObjectState *os = op.second;
                     ref<Expr> threadID = os->read(offset, type);
-                    //											llvm::errs() << "thread id
-                    //:
-                    //"
-                    //<< threadID << "\n";
                     executor->executeMemoryOperation(state, true, address, threadID, 0);
                     executor->bindLocal(ki, state, ConstantExpr::create(0, Expr::Int32));
 
@@ -394,8 +389,7 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                 } else if (f->getName().str() == "_ZdlPv" || f->getName().str() == "_Znwj" ||
                            f->getName().str() == "_Znwm" || f->getName().str() == "free") {
                   ref<Expr> address = (*bit)->arguments[0];
-                  //										llvm::errs() << "address
-                  //: " << address << "\n";
+                  // llvm::errs() << "address: " << address << "\n ";
                   Executor::StatePair zeroPointer = executor->fork(state, Expr::createIsZero(address), true);
                   if (zeroPointer.first) {
                     if (ki)
@@ -425,17 +419,12 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                   size = executor->toUnique(state, size);
                   if (dyn_cast<ConstantExpr>(size)) {
                     ref<Expr> addr = state.currentThread->stack->realStack.back().locals[ki->dest].value;
-                    //											llvm::errs() <<
-                    //"calloc address
-                    //:
-                    //"; addr->dump();
+                    // llvm::errs() << "calloc address : "; addr->dump();
                     ObjectPair op;
                     bool success = executor->getMemoryObject(op, state, state.currentThread->addressSpace, addr);
                     if (success) {
                       const MemoryObject *mo = op.first;
-                      //												llvm::errs()
-                      //<< "calloc address ; " << mo->address
-                      //<< " calloc size : " << mo->size << "\n";
+                      // llvm::errs() << "calloc address ; " << mo->address << " calloc size : " << mo->size << "\n";
                       ObjectState *os = executor->bindObjectInState(state, mo, isLocal);
                       os->initializeToRandom();
                       executor->bindLocal(ki, state, mo->getBaseExpr());
@@ -592,11 +581,9 @@ void ListenerService::startControl(Executor *executor) {
   llvm::errs() << "************************************************************************\n";
   llvm::errs() << "第" << traceNum << "次执行,路径文件为trace" << traceNum << ".txt";
   if (traceNum == 1) {
-    llvm::errs() << " 初始执行"
-                 << "\n";
+    llvm::errs() << " 初始执行 \n";
   } else {
-    llvm::errs() << " 前缀执行,前缀文件为prefix" << executor->prefix->getName() << ".txt"
-                 << "\n";
+    llvm::errs() << " 前缀执行, 前缀文件为 prefix" << executor->prefix->getName() << ".txt \n";
   }
   llvm::errs() << "************************************************************************\n";
   llvm::errs() << "\n";
@@ -606,11 +593,6 @@ void ListenerService::startControl(Executor *executor) {
 
 void ListenerService::endControl(Executor *executor) {
 
-#if DEBUG_RUNTIME
-  // true: output to file; false: output to terminal
-  rdManager.printCurrentTrace(true);
-  //			encode.showInitTrace();//need to be modified
-#endif
   if (executor->execStatus != Executor::SUCCESS) {
     llvm::errs() << "######################执行有错误,放弃本次执行##############\n";
     executor->isFinished = true;
@@ -619,6 +601,9 @@ void ListenerService::endControl(Executor *executor) {
     rdManager.getCurrentTrace()->traceType = Trace::REDUNDANT;
     llvm::errs() << "######################本条路径为旧路径####################\n";
   } else {
+#if PRINT_CURRENT_TRACE
+    rdManager.printCurrentTrace(false);
+#endif
     llvm::errs() << "######################本条路径为新路径####################\n";
     rdManager.getCurrentTrace()->traceType = Trace::UNIQUE;
     Trace *trace = rdManager.getCurrentTrace();
@@ -701,8 +686,6 @@ void ListenerService::endControl(Executor *executor) {
     delete encode;
     delete dtam;
   }
-
-  executor->getNewPrefix();
 
   while(!bitcodeListeners.empty()) {
     bitcodeListeners.pop_back();

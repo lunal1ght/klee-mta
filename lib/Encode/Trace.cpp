@@ -47,70 +47,51 @@ Trace::~Trace() {
   }
 }
 
-void Trace::print(bool file) {
-  // output to file
-  if (file) {
-    stringstream ss;
-    ss << "./output_info/trace_" << Id << ".data";
-    auto err = std::error_code();
-    raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
-    printAllEvent(out);
-    printThreadCreateAndJoin(out);
-    printReadSetAndWriteSet(out);
-    printWaitAndSignal(out);
-    printLockAndUnlock(out);
-    printBarrierOperation(out);
-    printPrintfParam(out);
-    printGlobalVariableInitializer(out);
-    printGlobalVariableLast(out);
-  } else {
-	// output to terminal
-    printAllEvent(errs());
-    printThreadCreateAndJoin(errs());
-    printWaitAndSignal(errs());
-    printReadSetAndWriteSet(errs());
-    printLockAndUnlock(errs());
-    printBarrierOperation(errs());
-    printPrintfParam(errs());
-    printGlobalVariableInitializer(errs());
-    printGlobalVariableLast(errs());
-  }
+void Trace::printDetailedInfo(raw_ostream &out) {
+  printAllEvent(out);
+  printThreadCreateAndJoin(out);
+  printReadSetAndWriteSet(out);
+  printWaitAndSignal(out);
+  printLockAndUnlock(out);
+  printBarrierOperation(out);
+  printPrintfParam(out);
+  printGlobalVariableInitializer(out);
+  printGlobalVariableLast(out);
 }
 
 void Trace::printAllEvent(raw_ostream &out) {
-  int threadId = 0;
+  int threadId = 1;
   for (auto thread : eventList) {
     if (thread.empty())
       continue;
-    out << "/*********Thread: " << threadId << "**********/\n";
+    out << "< Thread " << threadId << " >\n";
     for (auto event : thread) {
-      out << event->toString() << "\n";
+      out << event->toString();
     }
     threadId++;
   }
 }
 
 void Trace::printThreadCreateAndJoin(raw_ostream &out) {
-  out << "<----Thread Create---->\n";
+  out << "< Thread Create Events >\n";
   for (map<Event *, uint64_t>::iterator ci = createThreadPoint.begin(), ce = createThreadPoint.end(); ci != ce; ci++) {
-    out << ci->first->eventName << " create thread " << ci->second << "\n";
+    out << ci->first->eventName << " create Thread " << ci->second << "\n";
   }
-
-  out << "<----Thread Join---->\n";
+  out << "< Thread Join Events >\n";
   for (map<Event *, uint64_t>::iterator ji = joinThreadPoint.begin(), je = joinThreadPoint.end(); ji != je; ji++) {
-    out << ji->first->eventName << " create join " << ji->second << "\n";
+    out << ji->first->eventName << " join Thread" << ji->second << "\n";
   }
 }
 
 void Trace::printWaitAndSignal(raw_ostream &out) {
-  out << "<----Thread Wait---->\n";
+  out << "< Thread Wait Events >\n";
   for (map<string, vector<Wait_Lock *>>::iterator wi = all_wait.begin(), we = all_wait.end(); wi != we; wi++) {
     out << wi->first << " wait at \n";
     for (vector<Wait_Lock *>::iterator vi = wi->second.begin(), ve = wi->second.end(); vi != ve; vi++) {
       out << (*vi)->wait->toString() << "\n";
     }
   }
-  out << "<----Thread Signal---->\n";
+  out << "< Thread Signal Events >\n";
   for (map<string, vector<Event *>>::iterator si = all_signal.begin(), se = all_signal.end(); si != se; si++) {
     out << si->first << " signal at \n";
     for (vector<Event *>::iterator vi = si->second.begin(), ve = si->second.end(); vi != ve; vi++) {
@@ -120,7 +101,7 @@ void Trace::printWaitAndSignal(raw_ostream &out) {
 }
 
 void Trace::printReadSetAndWriteSet(raw_ostream &out) {
-  out << "<----ReadSet---->\n";
+  out << "< Global Read Events >\n";
   for (map<string, vector<Event *>>::iterator ri = readSet.begin(), re = readSet.end(); ri != re; ri++) {
     out << ri->first << " is readed at "
         << "\n";
@@ -128,7 +109,7 @@ void Trace::printReadSetAndWriteSet(raw_ostream &out) {
       out << (*vi)->toString() << "\n";
     }
   }
-  out << "<----WriteSet---->\n";
+  out << "< Global Write Events>\n";
   for (map<string, vector<Event *>>::iterator wi = writeSet.begin(), we = writeSet.end(); wi != we; wi++) {
     out << wi->first << " is writed at \n";
     for (vector<Event *>::iterator vi = wi->second.begin(), ve = wi->second.end(); vi != ve; vi++) {
@@ -138,7 +119,7 @@ void Trace::printReadSetAndWriteSet(raw_ostream &out) {
 }
 
 void Trace::printLockAndUnlock(raw_ostream &out) {
-  out << "<----all_lock_unlock---->\n";
+  out << "< lock-unlock Event Pairs>\n";
   for (map<string, vector<LockPair *>>::iterator li = all_lock_unlock.begin(), le = all_lock_unlock.end(); li != le;
        li++) {
     out << "Mutex:" << li->first << ":\n";
@@ -152,7 +133,7 @@ void Trace::printLockAndUnlock(raw_ostream &out) {
 }
 
 void Trace::printBarrierOperation(raw_ostream &out) {
-  out << "<----all_barrier_operation---->\n";
+  out << "< Barrier Events >\n";
   for (map<string, vector<Event *>>::iterator bi = all_barrier.begin(), be = all_barrier.end(); bi != be; bi++) {
     out << "Barrier:" << bi->first << ":\n";
     for (vector<Event *>::iterator vi = bi->second.begin(), ve = bi->second.end(); vi != ve; vi++) {
@@ -189,6 +170,13 @@ void Trace::printGlobalVariableInitializer(raw_ostream &out) {
     out << "Variable:" << gi->first << "\n";
     gi->second->print(out);
     out << "\n";
+  }
+}
+
+void Trace::printExecutionPath(raw_ostream &out) {
+  out << "< Execution Path >\n";
+  for(auto event : path) {
+    out << event->toString();
   }
 }
 

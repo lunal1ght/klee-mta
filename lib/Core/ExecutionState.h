@@ -21,11 +21,11 @@
 #include "klee/System/Time.h"
 
 #include "Memory.h"
-#include "../Thread/BarrierManager.h"
-#include "../Thread/CondManager.h"
-#include "../Thread/MutexManager.h"
-#include "../Thread/StackFrame.h"
-#include "../Thread/ThreadList.h"
+#include "klee/Thread/BarrierManager.h"
+#include "klee/Thread/CondManager.h"
+#include "klee/Thread/MutexManager.h"
+#include "klee/Thread/StackFrame.h"
+#include "klee/Thread/ThreadList.h"
 
 #include <map>
 #include <memory>

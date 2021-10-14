@@ -91,6 +91,7 @@ typedef unsigned TypeSize;
 #include "klee/Thread/StackFrame.h"
 #include "klee/Thread/Thread.h"
 #include "klee/Thread/ThreadScheduler.h"
+#include "klee/Config/DebugMacro.h"
 #include "CallPathManager.h"
 
 #include <algorithm>
@@ -3728,8 +3729,7 @@ void Executor::run(ExecutionState &initialState) {
         return;
       }
 
-      std::map<ExecutionState *, std::vector<SeedInfo>>::iterator it =
-          seedMap.upper_bound(lastState);
+      std::map<ExecutionState *, std::vector<SeedInfo>>::iterator it = seedMap.upper_bound(lastState);
       if (it == seedMap.end())
         it = seedMap.begin();
       lastState = it->first;
@@ -3814,8 +3814,7 @@ void Executor::run(ExecutionState &initialState) {
                               "but failed\n";
               isAbleToRun = false;
               break;
-              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but
-              // failed");
+              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but failed");
             }
             state.reSchedule();
             thread = state.getNextThread();
@@ -4219,7 +4218,6 @@ void Executor::callExternalFunction(ExecutionState &state,
     else
       klee_warning_once(function, "%s", os.str().c_str());
   }
-
   bool success = externalDispatcher->executeCall(function, target->inst, args);
   if (!success) {
     terminateStateOnError(state, "failed external call: " + function->getName(),
@@ -5137,7 +5135,7 @@ bool Executor::isFunctionSpecial(Function *f) {
 }
 
 void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **envp) {
-  llvm:errs() << "--Info: Iteritive verification started.\n";
+  llvm::errs() << "--Info: Iteritive verification started.\n";
   while (!isFinished && execStatus != RUNTIMEERROR) {
     execStatus = SUCCESS;
     listenerService->startControl(this);
@@ -5152,20 +5150,21 @@ void Executor::prepareNextExecution() {
   for (std::set<ExecutionState *>::const_iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
     delete *it;
   }
+  getNewPrefix();
 }
 
 void Executor::getNewPrefix() {
   //获取新的前缀
-  Prefix *prefix = listenerService->getRuntimeDataManager()->getNextPrefix();
-  if (prefix) {
+  Prefix *pref = listenerService->getRuntimeDataManager()->getNextPrefix();
+  if (pref) {
     delete this->prefix;
-    this->prefix = prefix;
+    this->prefix = pref;
+#if PRINT_PREFIX
+    prefix->print(llvm::errs());
+#endif
     isFinished = false;
   } else {
     isFinished = true;
-#if PRINT_RUNTIMEINFO
-    printPrefix();
-#endif
   }
 }
 

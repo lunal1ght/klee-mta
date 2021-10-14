@@ -7,16 +7,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CondManager.h"
+#include "klee/Thread/CondManager.h"
 
 #include <iterator>
 #include <utility>
 
-#include "../Encode/Transfer.h"
-#include "CondScheduler.h"
-#include "Mutex.h"
-#include "MutexManager.h"
-#include "WaitParam.h"
+#include "klee/Encode/Transfer.h"
+#include "klee/Thread/CondScheduler.h"
+#include "klee/Thread/Mutex.h"
+#include "klee/Thread/MutexManager.h"
+#include "klee/Thread/WaitParam.h"
 
 using namespace ::std;
 

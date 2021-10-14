@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Barrier.h"
+#include "klee/Thread/Barrier.h"
 
 using namespace ::std;
 

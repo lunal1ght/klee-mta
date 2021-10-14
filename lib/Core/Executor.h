@@ -30,8 +30,8 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "../Thread/StackType.h"
-#include "../Encode/ListenerService.h"
+#include "klee/Thread/StackType.h"
+#include "klee/Encode/ListenerService.h"
 
 #include <map>
 #include <memory>

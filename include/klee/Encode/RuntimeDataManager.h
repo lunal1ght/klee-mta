@@ -86,7 +86,7 @@ public:
   Trace *createNewTrace(unsigned traceId);
   Trace *getCurrentTrace();
   void addToScheduleSet(Prefix *prefix);
-  void printCurrentTrace(bool file);
+  void printCurrentTrace(bool toFile);
   Prefix *getNextPrefix();
   void clearAllPrefix();
   bool isCurrentTraceUntested();

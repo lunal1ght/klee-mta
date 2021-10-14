@@ -33,7 +33,6 @@ bool MutexManager::lock(Mutex *mutex, unsigned threadId, bool &isBlocked, string
     // mutex->addToBlockedList(thread);
     blockedThreadPool.insert(make_pair(threadId, mutex));
     isBlocked = true;
-    return true;
   } else {
     mutex->lock(threadId);
     isBlocked = false;
@@ -42,8 +41,8 @@ bool MutexManager::lock(Mutex *mutex, unsigned threadId, bool &isBlocked, string
       blockedThreadPool.erase(ti);
       // mutex->removeFromBlockedList(thread);
     }
-    return true;
   }
+  return true;
 }
 
 bool MutexManager::unlock(string mutexName, string &errorMsg) {

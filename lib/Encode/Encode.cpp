@@ -43,9 +43,8 @@
 #include "klee/Expr/Expr.h"
 #include "klee/Module/InstructionInfoTable.h"
 #include "klee/Module/KInstruction.h"
+#include "klee/Config/DebugMacro.h"
 
-#define FORMULA_DEBUG 0
-#define BRANCH_INFO 1
 #define BUFFERSIZE 300
 #define BIT_WIDTH 64
 
@@ -66,22 +65,22 @@ void Encode::buildAllFormula() {
   buildPartialOrderFormula(z3_solver);
   buildReadWriteFormula(z3_solver);
   buildSynchronizeFormula(z3_solver);
-
-  // check_result result;
-  // try {
-  //   result = z3_solver.check();
-  //   if (result == z3::sat) {
-  //     std::cerr << "buildAllFormula success!" << "\n";
-  //   } else {
-  //     std::cerr << "buildAllFormula fail!" << "\n";
-  //   }
-  // } catch (z3::exception &ex) {
-  //   std::cerr << "\nUnexpected error: " << ex.msg() << "\n";
-  // }
+#if CHECK_BUILD
+  check_result result;
+  try {
+    result = z3_solver.check();
+    if (result == z3::sat) {
+      std::cerr << "buildAllFormula success!" << "\n";
+    } else {
+      std::cerr << "buildAllFormula fail!" << "\n";
+    }
+  } catch (z3::exception &ex) {
+    std::cerr << "\nUnexpected error: " << ex.msg() << "\n";
+  }
+#endif
 }
 
 void Encode::buildPTSFormula() {
-
   buildInitValueFormula(z3_taint_solver);
   buildPathCondition(z3_taint_solver);
   buildReadWriteFormula(z3_taint_solver);
@@ -97,11 +96,11 @@ void Encode::buildPTSFormula() {
 
 // true :: assert can't be violated. false :: assert can be violated.
 bool Encode::verify() {
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   showInitTrace();
 #endif
   std::cerr << "\nVerify this trace.\n";
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   stringstream ss;
   ss << "./output_info/"
      << "Trace" << trace->Id << ".z3expr";
@@ -174,7 +173,7 @@ bool Encode::verify() {
       runtimeData->addToScheduleSet(prefix);
       std::cerr << "Assert Failure at " << assertFormula[i].first->inst->info->file << ": "
                 << assertFormula[i].first->inst->info->line << "\n";
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
       showPrefixInfo(prefix, assertFormula[i].first);
       std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
       out_file << "!assertFormula[i].second : " << !assertFormula[i].second << "\n";
@@ -188,7 +187,7 @@ bool Encode::verify() {
       return false;
     }
     z3_solver.pop(); // backtrack point 2
-#if BRANCH_INFO
+#if PRINT_BRANCH_INFO
     stringstream ss;
     ss << "Trace" << trace->Id << "#"
        << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
@@ -214,19 +213,17 @@ std::string Encode::solvingInfo(check_result result) {
 }
 
 void Encode::check_if() {
-  unsigned sum = 0, num = 0;
+  unsigned sum = 0;
   unsigned size = ifFormula.size();
   std::cerr << "Sum of branches: " << size << "\n";
   for (unsigned i = 0; i < ifFormula.size(); i++) {
-    num++;
-
-#if BRANCH_INFO
+#if PRINT_BRANCH_INFO
     stringstream ss;
     ss << "Trace" << trace->Id
-       << "#"
-       << ifFormula[i].first->inst->info->line << "#" << ifFormula[i].first->eventName << "#"
-       << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition);
-    std::cerr << "Verify branch " << num << " @" << ss.str() << ": ";
+       << "-L"
+       << ifFormula[i].first->inst->info->line << "-" << ifFormula[i].first->eventName << "-"
+       << "[" << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "]";
+    std::cerr << "Flip branch " << ss.str() << ": ";
 #endif
     // create a backstracking point
     z3_solver.push();
@@ -295,23 +292,23 @@ void Encode::check_if() {
       gettimeofday(&finish, NULL);
       double cost =
           (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-#if BRANCH_INFO
-      std::cerr << "Cost : " << cost << " ";
+#if PRINT_BRANCH_INFO
+      std::cerr << "Cost: " << cost << "s ";
 #endif
       solvingTimes++;
-      stringstream output;
       if (result == z3::sat) {
         vector<Event *> vecEvent;
         computePrefix(vecEvent, ifFormula[i].first);
         Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, ss.str());
-        output << "./output_info/" << prefix->getName() << ".z3expr";
         // printf prefix to DIR output_info
         runtimeData->addToScheduleSet(prefix);
         runtimeData->satBranch++;
         runtimeData->satCost += cost;
         sum++;
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
         showPrefixInfo(prefix, ifFormula[i].first);
+        stringstream output;
+        output << "./output_info/" << prefix->getName() << ".z3expr";
         std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
         out_file << "!ifFormula[i].second : " << !ifFormula[i].second << "\n";
         out_file << "\n" << z3_solver << "\n";
@@ -325,11 +322,11 @@ void Encode::check_if() {
         runtimeData->unSatCost += cost;
       }
 
-#if BRANCH_INFO
+#if PRINT_BRANCH_INFO
       if (result == z3::sat) {
-        std::cerr << "Yes!\n";
+        std::cerr << "Success!\n";
       } else if (result == z3::unsat) {
-        std::cerr << "No!\n";
+        std::cerr << "Failed!\n";
       } else
         std::cerr << "Warning!\n";
 #endif
@@ -345,8 +342,7 @@ void Encode::check_if() {
 void Encode::showInitTrace() {
   auto err = std::error_code();
   stringstream output;
-  output << "./output_info/"
-         << "Trace" << trace->Id << ".bitcode";
+  output << "./output_info/" << "Trace" << trace->Id << ".bitcode";
   raw_fd_ostream out_to_file(output.str().c_str(), err, sys::fs::F_Append);
   unsigned size = trace->path.size();
   // bitcode
@@ -765,9 +761,9 @@ void Encode::logStatisticInfo() {
 
 void Encode::buildInitValueFormula(solver z3_solver_init) {
 // for global initializer
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   std::cerr << "\nGlobal var initial value:\n";
-  std::cerr << "\nGlobal var initial size: " << trace->global_variable_initializer.size() << "\n";
+  std::cerr << "Number: " << trace->global_variable_initializer.size() << "\n";
 #endif
   std::map<std::string, llvm::Constant *>::iterator gvi = trace->global_variable_initializer_RelatedToBranch.begin();
 
@@ -780,7 +776,7 @@ void Encode::buildInitValueFormula(solver z3_solver_init) {
     expr rhs = buildExprForConstantValue(gvi->second, false, "");
     z3_solver_init.add(lhs == rhs);
 
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << (lhs == rhs) << "\n";
 #endif
   }
@@ -791,7 +787,7 @@ void Encode::buildInitValueFormula(solver z3_solver_init) {
 void Encode::buildOutputFormula() {
 // for global var at last
 // need to choose manually
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   std::cerr << "\nGlobal var final value:\n";
 #endif
   std::map<std::string, llvm::Constant *>::iterator gvl = trace->global_variable_final.begin();
@@ -839,7 +835,7 @@ void Encode::buildOutputFormula() {
     }
 
     pair<expr, expr> temp = make_pair(finalValue, constrait);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << "\n" << finalValue << "-------" << constrait;
 #endif
     globalOutputFormula.push_back(temp);
@@ -878,8 +874,8 @@ void Encode::markLatestWriteForGlobalVar() {
 }
 
 void Encode::buildPathCondition(solver z3_solver_pc) {
-#if FORMULA_DEBUG
-  std::cerr << "\nBasicFormula:\n";
+#if PRINT_FORMULA
+  std::cerr << "\nPath Condition:\n";
 #endif
 
   KQuery2Z3 *kq = new KQuery2Z3(z3_ctx);
@@ -888,7 +884,7 @@ void Encode::buildPathCondition(solver z3_solver_pc) {
   for (unsigned int i = 0; i < totalExpr; i++) {
     z3::expr temp = kq->getZ3Expr(trace->pathConditionRelatedToBranch[i]);
     z3_solver_pc.add(temp);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << temp << "\n";
 #endif
   }
@@ -1119,8 +1115,8 @@ z3::sort Encode::llvmTy_to_z3Ty(const Type *typ) {
 } //
 
 void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
-#if FORMULA_DEBUG
-  std::cerr << "\nMemoryModelFormula:\n";
+#if PRINT_FORMULA
+  std::cerr << "\nMemory Model Formula:\n";
 #endif
   z3_solver_mm.add(z3_ctx.int_const("E_INIT") == 0);
   // statics
@@ -1138,7 +1134,7 @@ void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
     expr init = z3_ctx.int_const("E_INIT");
     expr firstEventExpr = z3_ctx.int_const(firstEvent->eventName.c_str());
     expr temp1 = (init < firstEventExpr);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << temp1 << "\n";
 #endif
     z3_solver_mm.add(temp1);
@@ -1148,7 +1144,7 @@ void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
     expr final = z3_ctx.int_const("E_FINAL");
     expr finalEventExpr = z3_ctx.int_const(finalEvent->eventName.c_str());
     expr temp2 = (finalEventExpr < final);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << temp2 << "\n";
 #endif
     z3_solver_mm.add(temp2);
@@ -1172,7 +1168,7 @@ void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
       expr preExpr = z3_ctx.int_const(pre->eventName.c_str());
       expr postExpr = z3_ctx.int_const(post->eventName.c_str());
       expr temp = (preExpr < postExpr);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
       std::cerr << temp << "\n";
 #endif
       z3_solver_mm.add(temp);
@@ -1304,10 +1300,8 @@ InstType Encode::getInstOpType(Event *event) {
 }
 
 void Encode::buildPartialOrderFormula(solver z3_solver_po) {
-#if FORMULA_DEBUG
-  std::cerr << "\nPartialOrderFormula:\n";
-#endif
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
+  std::cerr << "\nPartial Order Formula:";
   std::cerr << "\nthread_create:\n";
 #endif
   // handle thread_create
@@ -1316,12 +1310,12 @@ void Encode::buildPartialOrderFormula(solver z3_solver_po) {
     // the event is at the point of creating thread
     string creatPoint = itc->first->eventName;
     // the event is the first step of created thread
-    if (trace->eventList[itc->second].empty()) {
+    if (trace->eventList[itc->second].size() != 0) {
       string firstStep = trace->eventList[itc->second].at(0)->eventName;
       expr prev = z3_ctx.int_const(creatPoint.c_str());
       expr back = z3_ctx.int_const(firstStep.c_str());
       expr twoEventOrder = (prev < back);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
       std::cerr << twoEventOrder << "\n";
 #endif
       z3_solver_po.add(twoEventOrder);
@@ -1329,7 +1323,7 @@ void Encode::buildPartialOrderFormula(solver z3_solver_po) {
   }
   // statics
   formulaNum += trace->createThreadPoint.size();
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   std::cerr << "\nthread_join:\n";
 #endif
   // handle thread_join
@@ -1342,9 +1336,9 @@ void Encode::buildPartialOrderFormula(solver z3_solver_po) {
     expr prev = z3_ctx.int_const(lastStep.c_str());
     expr back = z3_ctx.int_const(joinPoint.c_str());
     expr twoEventOrder = (prev < back);
-#if FORMULA_DEBUG
-    std::cerr << "jionPoint : " << joinPoint << "\n";
-    std::cerr << "lastStep : " << lastStep << "\n";
+#if PRINT_FORMULA
+    std::cerr << "Jion Point: " << joinPoint << ", ";
+    std::cerr << "Last Step: " << lastStep << " => ";
     std::cerr << twoEventOrder << "\n";
 #endif
     z3_solver_po.add(twoEventOrder);
@@ -1354,8 +1348,8 @@ void Encode::buildPartialOrderFormula(solver z3_solver_po) {
 }
 
 void Encode::buildReadWriteFormula(solver z3_solver_rw) {
-#if FORMULA_DEBUG
-  std::cerr << "\nReadWriteFormula:\n";
+#if PRINT_FORMULA
+  std::cerr << "\nRead-Write Formula:\n";
 #endif
   // prepare
   markLatestWriteForGlobalVar();
@@ -1479,7 +1473,7 @@ void Encode::buildReadWriteFormula(solver z3_solver_rw) {
 
       if (oneVarAllRead.size() > 0) {
         expr oneReadExprs = makeExprsOr(oneVarAllRead);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
         std::cerr << oneReadExprs << "\n";
 #endif
         z3_solver_rw.add(oneReadExprs);
@@ -1559,8 +1553,8 @@ expr Encode::enumerateOrder(Event *read, Event *write, Event *anotherWrite) {
 }
 
 void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
-#if FORMULA_DEBUG
-  std::cerr << "\nSynchronizeFormula:\n";
+#if PRINT_FORMULA
+  std::cerr << "\nSynchronization Formula:\n";
   std::cerr << "The sum of locks:" << trace->all_lock_unlock.size() << "\n";
 #endif
 
@@ -1602,7 +1596,7 @@ void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
           formulaNum += 2;
         }
         z3_solver_sync.add(twinLockPairOrder);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
         std::cerr << twinLockPairOrder << "\n";
 #endif
       }
@@ -1611,7 +1605,7 @@ void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
 
 // new method
 // wait/signal
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   std::cerr << "The sum of wait:" << trace->all_wait.size() << "\n";
   std::cerr << "The sum of signal:" << trace->all_signal.size() << "\n";
 #endif
@@ -1652,7 +1646,7 @@ void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
       }
       expr one_wait = makeExprsOr(possibleMap);
       expr wait_value = makeExprsAnd(possibleValue);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
       std::cerr << one_wait << "\n";
 #endif
       z3_solver_sync.add(one_wait);
@@ -1732,7 +1726,7 @@ void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
   }
 
 // barrier
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
   std::cerr << "The sum of barrier:" << trace->all_barrier.size() << "\n";
 #endif
   map<string, vector<Event *>>::iterator it_barrier = trace->all_barrier.begin();
@@ -1745,7 +1739,7 @@ void Encode::buildSynchronizeFormula(solver z3_solver_sync) {
       expr exp2 = z3_ctx.int_const(temp[i + 1]->eventName.c_str());
       expr relation = (exp1 == exp2);
 
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
       std::cerr << relation << "\n";
 #endif
       z3_solver_sync.add(relation);
@@ -1793,21 +1787,24 @@ expr Encode::makeExprsSum(vector<expr> exprs) {
 }
 
 void Encode::buildInitTaintFormula(solver z3_solver_it) {
+#if PRINT_FORMULA
+    std::cerr << "Initial Taint Formula\n";
+#endif
   std::map<std::string, llvm::Constant *>::iterator gvi = trace->global_variable_initializer.begin();
   for (; gvi != trace->global_variable_initializer.end(); gvi++) {
     string str = gvi->first + "_Init_tag";
     expr lhs = z3_ctx.bool_const(str.c_str());
     expr rhs = z3_ctx.bool_val(false);
     z3_solver_it.add(lhs == rhs);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
     std::cerr << (lhs == rhs) << "\n";
 #endif
   }
 }
 
 void Encode::buildTaintMatchFormula(solver z3_solver_tm) {
-#if FORMULA_DEBUG
-  std::cerr << "\nTaintMatchFormula:\n";
+#if PRINT_FORMULA
+  std::cerr << "\nTaint Match Formula:\n";
 #endif
 
   map<string, vector<Event *>>::iterator read;
@@ -1919,7 +1916,7 @@ void Encode::buildTaintMatchFormula(solver z3_solver_tm) {
           oneVarAllRead.push_back(if_and_only_if);
         }
         expr oneReadExprs = makeExprsOr(oneVarAllRead);
-#if FORMULA_DEBUG
+#if PRINT_FORMULA
         std::cerr << oneReadExprs << "\n";
 #endif
         z3_solver_tm.add(oneReadExprs);

@@ -171,8 +171,19 @@ void RuntimeDataManager::addToScheduleSet(Prefix *prefix) {
   scheduleSet.push_back(prefix);
 }
 
-void RuntimeDataManager::printCurrentTrace(bool file) {
-  currentTrace->print(file);
+// file--true: output to file; file--false: output to terminal
+void RuntimeDataManager::printCurrentTrace(bool toFile) {
+  if (toFile) {
+    stringstream ss;
+    ss << "./output_info/trace_" << currentTrace->Id << ".data";
+    auto err = std::error_code();
+    raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
+    currentTrace->printDetailedInfo(out);
+    currentTrace->printExecutionPath(out);
+  } else {
+    currentTrace->printDetailedInfo(llvm::errs());
+    currentTrace->printExecutionPath(llvm::errs());
+  }
 }
 
 Prefix *RuntimeDataManager::getNextPrefix() {
