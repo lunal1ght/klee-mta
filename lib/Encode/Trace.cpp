@@ -32,104 +32,66 @@ namespace klee {
 Trace::Trace() : Id(0), nextEventId(0), eventList(20), isUntested(true) {}
 
 Trace::~Trace() {
-  for (vector<Event *>::iterator ti = path.begin(), te = path.end(); ti != te; ti++) {
-    delete *ti;
+  for (auto event : path) {
+    delete event;
   }
-  for (map<string, vector<LockPair *>>::iterator li = all_lock_unlock.begin(), le = all_lock_unlock.end(); li != le;
-       li++) {
-    for (vector<LockPair *>::iterator ei = li->second.begin(), ee = li->second.end(); ei != ee; ei++) {
-      delete *ei;
+  for (auto li : all_lock_unlock) {
+    for (auto ei : li.second) {
+      delete ei;
     }
   }
-  for (map<string, vector<Wait_Lock *>>::iterator wi = all_wait.begin(), we = all_wait.end(); wi != we; wi++) {
-    for (vector<Wait_Lock *>::iterator ei = wi->second.begin(), ee = wi->second.end(); ei != ee; ei++) {
-      delete *ei;
+  for (auto wi : all_wait) {
+    for (auto ei : wi.second) {
+      delete ei;
     }
   }
-  // overlook some event, alloca event only exist in trace!
-  //	for (vector<vector<Event*>*>::iterator evi = eventList.begin(), eve =
-  //			eventList.end(); evi != eve; evi++) {
-  //		if (*evi) {
-  //			for (vector<Event*>::iterator ei = (*evi)->begin(), ee =
-  //					(*evi)->end(); ei != ee; ei++) {
-  //				delete *ei;
-  //			}
-  //			delete *evi;
-  //		}
-  //	}
-
-  //	for (map<string, Constant*>::iterator pi = printf_variable_value.begin(), pe = printf_variable_value.end(); pi
-  //!= pe; pi++) { 		if (pi->second != NULL) { 			delete pi->second;
-  //		}
-  //	}
 }
 
-void Trace::print(bool file) {
-  // output to file
-  if (file) {
-    stringstream ss;
-    ss << "./output_info/trace_" << Id << ".data";
-    auto err = std::error_code();
-    raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
-    printAllEvent(out);
-    printThreadCreateAndJoin(out);
-    printReadSetAndWriteSet(out);
-    printWaitAndSignal(out);
-    printLockAndUnlock(out);
-    printBarrierOperation(out);
-    printPrintfParam(out);
-    printGlobalVariableInitializer(out);
-    printGlobalVariableLast(out);
-  } else {
-	// output to terminal
-    printAllEvent(errs());
-    printThreadCreateAndJoin(errs());
-    printWaitAndSignal(errs());
-    printReadSetAndWriteSet(errs());
-    printLockAndUnlock(errs());
-    printBarrierOperation(errs());
-    printPrintfParam(errs());
-    printGlobalVariableInitializer(errs());
-    printGlobalVariableLast(errs());
-  }
+void Trace::printDetailedInfo(raw_ostream &out) {
+  // printAllEvent(out);
+  printThreadCreateAndJoin(out);
+  printReadSetAndWriteSet(out);
+  printWaitAndSignal(out);
+  printLockAndUnlock(out);
+  printBarrierOperation(out);
+  printPrintfParam(out);
+  printGlobalVariableInitializer(out);
+  printGlobalVariableLast(out);
 }
 
 void Trace::printAllEvent(raw_ostream &out) {
-  int threadId = 0;
-  for (vector<vector<Event *> *>::iterator evi = eventList.begin(), eve = eventList.end(); evi != eve; evi++) {
-    vector<Event *> *item = *evi;
-    if (item) {
-      out << "/*********Thread: " << threadId << "**********/\n";
-      for (vector<Event *>::iterator ei = item->begin(), ee = item->end(); ei != ee; ei++) {
-        Event *event = *ei;
-        out << event->toString() << "\n";
-      }
+  int threadId = 1;
+  for (auto thread : eventList) {
+    if (thread.empty())
+      continue;
+    out << "< Thread " << threadId << " >\n";
+    for (auto event : thread) {
+      out << event->toString();
     }
     threadId++;
   }
 }
 
 void Trace::printThreadCreateAndJoin(raw_ostream &out) {
-  out << "<----Thread Create---->\n";
+  out << "< Thread Create Events >\n";
   for (map<Event *, uint64_t>::iterator ci = createThreadPoint.begin(), ce = createThreadPoint.end(); ci != ce; ci++) {
-    out << ci->first->eventName << " create thread " << ci->second << "\n";
+    out << ci->first->eventName << " create Thread " << ci->second << "\n";
   }
-
-  out << "<----Thread Join---->\n";
+  out << "< Thread Join Events >\n";
   for (map<Event *, uint64_t>::iterator ji = joinThreadPoint.begin(), je = joinThreadPoint.end(); ji != je; ji++) {
-    out << ji->first->eventName << " create join " << ji->second << "\n";
+    out << ji->first->eventName << " join Thread" << ji->second << "\n";
   }
 }
 
 void Trace::printWaitAndSignal(raw_ostream &out) {
-  out << "<----Thread Wait---->\n";
+  out << "< Thread Wait Events >\n";
   for (map<string, vector<Wait_Lock *>>::iterator wi = all_wait.begin(), we = all_wait.end(); wi != we; wi++) {
     out << wi->first << " wait at \n";
     for (vector<Wait_Lock *>::iterator vi = wi->second.begin(), ve = wi->second.end(); vi != ve; vi++) {
       out << (*vi)->wait->toString() << "\n";
     }
   }
-  out << "<----Thread Signal---->\n";
+  out << "< Thread Signal Events >\n";
   for (map<string, vector<Event *>>::iterator si = all_signal.begin(), se = all_signal.end(); si != se; si++) {
     out << si->first << " signal at \n";
     for (vector<Event *>::iterator vi = si->second.begin(), ve = si->second.end(); vi != ve; vi++) {
@@ -139,25 +101,24 @@ void Trace::printWaitAndSignal(raw_ostream &out) {
 }
 
 void Trace::printReadSetAndWriteSet(raw_ostream &out) {
-  out << "<----ReadSet---->\n";
+  out << "< Global Read Events >\n";
   for (map<string, vector<Event *>>::iterator ri = readSet.begin(), re = readSet.end(); ri != re; ri++) {
-    out << ri->first << " is readed at "
-        << "\n";
+    out << ri->first << " is readed at: " << "\n";
     for (vector<Event *>::iterator vi = ri->second.begin(), ve = ri->second.end(); vi != ve; vi++) {
-      out << (*vi)->toString() << "\n";
+      out << (*vi)->toString();
     }
   }
-  out << "<----WriteSet---->\n";
+  out << "\n< Global Write Events>\n";
   for (map<string, vector<Event *>>::iterator wi = writeSet.begin(), we = writeSet.end(); wi != we; wi++) {
-    out << wi->first << " is writed at \n";
+    out << wi->first << " is writed at: \n";
     for (vector<Event *>::iterator vi = wi->second.begin(), ve = wi->second.end(); vi != ve; vi++) {
-      out << (*vi)->toString() << "\n";
+      out << (*vi)->toString();
     }
   }
 }
 
 void Trace::printLockAndUnlock(raw_ostream &out) {
-  out << "<----all_lock_unlock---->\n";
+  out << "< Lock-Unlock Event Pairs>\n";
   for (map<string, vector<LockPair *>>::iterator li = all_lock_unlock.begin(), le = all_lock_unlock.end(); li != le;
        li++) {
     out << "Mutex:" << li->first << ":\n";
@@ -171,7 +132,7 @@ void Trace::printLockAndUnlock(raw_ostream &out) {
 }
 
 void Trace::printBarrierOperation(raw_ostream &out) {
-  out << "<----all_barrier_operation---->\n";
+  out << "< Barrier Events >\n";
   for (map<string, vector<Event *>>::iterator bi = all_barrier.begin(), be = all_barrier.end(); bi != be; bi++) {
     out << "Barrier:" << bi->first << ":\n";
     for (vector<Event *>::iterator vi = bi->second.begin(), ve = bi->second.end(); vi != ve; vi++) {
@@ -181,7 +142,7 @@ void Trace::printBarrierOperation(raw_ostream &out) {
 }
 
 void Trace::printPrintfParam(raw_ostream &out) {
-  out << "<----all_printf_param---->\n";
+  out << "< printf param >\n";
   for (map<string, Constant *>::iterator pi = printf_variable_value.begin(), pe = printf_variable_value.end(); pi != pe;
        pi++) {
     out << "Variable:" << pi->first << "\n";
@@ -191,7 +152,7 @@ void Trace::printPrintfParam(raw_ostream &out) {
 }
 
 void Trace::printGlobalVariableLast(raw_ostream &out) {
-  out << "<----all_global_variable_last---->\n";
+  out << "< Global variable last >\n";
   for (map<string, Constant *>::iterator gi = global_variable_final.begin(), ge = global_variable_final.end(); gi != ge;
        gi++) {
     out << "Variable:" << gi->first << "\n";
@@ -211,17 +172,19 @@ void Trace::printGlobalVariableInitializer(raw_ostream &out) {
   }
 }
 
+void Trace::printExecutionTrace(raw_ostream &out) {
+  out << "< Execution Trace >\n";
+  for(auto event : path) {
+    out << event->toString();
+  }
+}
+
 void Trace::insertEvent(Event *event, unsigned threadId) {
-  // cerr << threadId << " " << eventList.size() << endl;
   while (eventList.size() <= threadId) {
-    eventList.resize(2 * eventList.size(), NULL);
+    eventList.resize(2 * eventList.size(), {});
   }
-  if (!eventList[threadId]) {
-    eventList[threadId] = new vector<Event *>();
-    // std::cerr << "create eventList id : " << threadId << "\n";
-  }
-  eventList[threadId]->push_back(event);
-  event->threadEventId = eventList[threadId]->size();
+  eventList[threadId].push_back(event);
+  event->threadEventId = eventList[threadId].size();
 }
 
 Event *Trace::createEvent(unsigned threadId, KInstruction *inst, uint64_t address, bool isLoad, int time,
@@ -371,15 +334,15 @@ void Trace::insertPath(Event *event) { path.push_back(event); }
 void Trace::createAbstract() {
   //	std::cerr << "createAbstract\n" ;
   for (unsigned tid = 0; tid < this->eventList.size(); tid++) {
-    std::vector<Event *> *thread = this->eventList[tid];
-    if (thread == NULL) // A bug introduced by lcyu
+    std::vector<Event *> &thread = this->eventList[tid];
+    if (thread.empty()) // A bug introduced by lcyu
       continue;
     stringstream ss;
-    string fn = thread->at(0)->inst->inst->getParent()->getParent()->getName().data();
+    string fn = thread.at(0)->inst->inst->getParent()->getParent()->getName().data();
     ss << fn << ":";
     //		std::cerr << fn << "\n";
-    for (unsigned i = 0; i < thread->size(); i++) {
-      Event *event = thread->at(i);
+    for (unsigned i = 0; i < thread.size(); i++) {
+      Event *event = thread.at(i);
       if (event->isConditionInst) {
         // std::cerr << "condition : " << event->condition << " ";
         // event->inst->inst->dump();

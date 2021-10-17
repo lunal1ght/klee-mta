@@ -25,9 +25,9 @@
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 
-#include "../Thread/StackType.h"
-#include "../Thread/Thread.h"
-#include "../Thread/ThreadScheduler.h"
+#include "klee/Thread/StackType.h"
+#include "klee/Thread/Thread.h"
+#include "klee/Thread/ThreadScheduler.h"
 
 #include <cassert>
 #include <iomanip>
@@ -371,15 +371,12 @@ Thread* ExecutionState::getCurrentThread() {
 }
 
 Thread* ExecutionState::getNextThread() {
-	Thread* nextThread;
-	if (!threadScheduler->isSchedulerEmpty()) {
-		nextThread = threadScheduler->selectNextItem();
-	} else {
-		nextThread = NULL;
+	if (threadScheduler->isSchedulerEmpty()) {
+    assert(0 && "No thread scheduller is ready.");
 	}
-	currentThread = nextThread;
+	currentThread = threadScheduler->selectNextItem();
 	currentStack = currentThread->stack;
-	return nextThread;
+	return currentThread;
 }
 
 bool ExecutionState::examineAllThreadFinalState() {

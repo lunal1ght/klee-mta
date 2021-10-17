@@ -30,8 +30,8 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "../Thread/StackType.h"
-#include "../Encode/ListenerService.h"
+#include "klee/Thread/StackType.h"
+#include "klee/Encode/ListenerService.h"
 
 #include <map>
 #include <memory>
@@ -625,7 +625,7 @@ public:
   bool isFunctionSpecial(llvm::Function *f);
   void runVerification(llvm::Function *f, int argc, char **argv, char **envp);
   void prepareNextExecution();
-  void getNewPrefix();
+  void prepareNewPrefix();
   void printInstrcution(ExecutionState &state, KInstruction *ki);
   void printPrefix();
 };

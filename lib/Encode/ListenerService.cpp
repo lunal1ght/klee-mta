@@ -31,6 +31,7 @@
 #include "klee/Encode/SymbolicListener.h"
 #include "klee/Encode/TaintListener.h"
 #include "klee/Thread/StackType.h"
+#include "klee/Config/DebugMacro.h"
 
 extern void *__dso_handle __attribute__((__weak__));
 
@@ -42,7 +43,13 @@ ListenerService::ListenerService(Executor *executor) {
   cost = 0;
 }
 
-ListenerService::~ListenerService() {}
+ListenerService::~ListenerService() {
+  for (auto listener : bitcodeListeners) {
+    delete listener;
+  }
+  delete encode;
+  delete dtam;
+}
 
 void ListenerService::pushListener(BitcodeListener *bitcodeListener) { bitcodeListeners.push_back(bitcodeListener); }
 
@@ -181,29 +188,26 @@ void ListenerService::beforeExecuteInstruction(Executor *executor, ExecutionStat
       }
       if (func->getName().contains("llvm.dbg.declare"))
         break;
-      std::vector<BitcodeListener *>::iterator bit = bitcodeListeners.begin(), bie = bitcodeListeners.end();
-      for (; bit != bie; ++bit) {
-        state.currentStack = (*bit)->stack[state.currentThread->threadId];
-
-        (*bit)->arguments.reserve(numArgs);
+      for (auto listener : bitcodeListeners) {
+        state.currentStack = listener->stack[state.currentThread->threadId];
+        listener->arguments.reserve(numArgs);
         for (unsigned j = 0; j < numArgs; ++j) {
-          (*bit)->arguments.push_back(executor->eval(ki, j + 1, state).value);
+          listener->arguments.push_back(executor->eval(ki, j + 1, state).value);
         }
         const FunctionType *fType = dyn_cast<FunctionType>(cast<PointerType>(func->getType())->getElementType());
         const FunctionType *fpType = dyn_cast<FunctionType>(cast<PointerType>(fp->getType())->getElementType());
         if (fType != fpType) {
           unsigned i = 0;
-          std::vector<ref<Expr>>::iterator ai = (*bit)->arguments.begin(), ie = (*bit)->arguments.end();
-          for (; ai != ie; ++ai) {
-            Expr::Width to, from = (*ai)->getWidth();
+          for (auto arg : listener->arguments) {
+            Expr::Width to, from = arg->getWidth();
             if (i < fType->getNumParams()) {
               to = executor->getWidthForLLVMType(fType->getParamType(i));
               if (from != to) {
                 bool isSExt = cs.paramHasAttr(i + 1, llvm::Attribute::SExt);
                 if (isSExt) {
-                  (*bit)->arguments[i] = SExtExpr::create((*bit)->arguments[i], to);
+                  listener->arguments[i] = SExtExpr::create(listener->arguments[i], to);
                 } else {
-                  (*bit)->arguments[i] = ZExtExpr::create((*bit)->arguments[i], to);
+                  listener->arguments[i] = ZExtExpr::create(listener->arguments[i], to);
                 }
               }
             }
@@ -219,21 +223,21 @@ void ListenerService::beforeExecuteInstruction(Executor *executor, ExecutionStat
               StackFrame &sf = state.currentStack->realStack.back();
               Expr::Width WordSize = Context::get().getPointerWidth();
               if (WordSize == Expr::Int32) {
-                executor->executeMemoryOperation(state, true, (*bit)->arguments[0], sf.varargs->getBaseExpr(), 0);
+                executor->executeMemoryOperation(state, true, listener->arguments[0], sf.varargs->getBaseExpr(), 0);
               } else {
                 // gp_offset
-                executor->executeMemoryOperation(state, true, (*bit)->arguments[0], ConstantExpr::create(48, 32), 0);
+                executor->executeMemoryOperation(state, true, listener->arguments[0], ConstantExpr::create(48, 32), 0);
                 // fp_offset
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(4, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(4, 64)),
                                                  ConstantExpr::create(304, 32), 0);
                 // overflow_arg_area
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(8, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(8, 64)),
                                                  sf.varargs->getBaseExpr(), 0);
                 // reg_save_area
                 executor->executeMemoryOperation(state, true,
-                                                 AddExpr::create((*bit)->arguments[0], ConstantExpr::create(16, 64)),
+                                                 AddExpr::create(listener->arguments[0], ConstantExpr::create(16, 64)),
                                                  ConstantExpr::create(0, 64), 0);
               }
               break;
@@ -288,10 +292,7 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
         if (state.currentStack->realStack.size() <= 1) {
 
         } else {
-          //						llvm::errs() << "
-          // state.currentStack->popFrame();state.currentStack->popFrame(); : " << "\n";
           state.currentStack->popFrame();
-          //						llvm::errs() << " state.currentStack->popFrame(); : " << "\n";
           if (!isVoidReturn) {
             Type *t = caller->getType();
             if (t != Type::getVoidTy(i->getContext())) {
@@ -350,10 +351,6 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                     ref<Expr> offset = mo->getOffsetExpr(address);
                     const ObjectState *os = op.second;
                     ref<Expr> threadID = os->read(offset, type);
-                    //											llvm::errs() << "thread id
-                    //:
-                    //"
-                    //<< threadID << "\n";
                     executor->executeMemoryOperation(state, true, address, threadID, 0);
                     executor->bindLocal(ki, state, ConstantExpr::create(0, Expr::Int32));
 
@@ -394,8 +391,7 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                 } else if (f->getName().str() == "_ZdlPv" || f->getName().str() == "_Znwj" ||
                            f->getName().str() == "_Znwm" || f->getName().str() == "free") {
                   ref<Expr> address = (*bit)->arguments[0];
-                  //										llvm::errs() << "address
-                  //: " << address << "\n";
+                  // llvm::errs() << "address: " << address << "\n ";
                   Executor::StatePair zeroPointer = executor->fork(state, Expr::createIsZero(address), true);
                   if (zeroPointer.first) {
                     if (ki)
@@ -425,17 +421,12 @@ void ListenerService::afterExecuteInstruction(Executor *executor, ExecutionState
                   size = executor->toUnique(state, size);
                   if (dyn_cast<ConstantExpr>(size)) {
                     ref<Expr> addr = state.currentThread->stack->realStack.back().locals[ki->dest].value;
-                    //											llvm::errs() <<
-                    //"calloc address
-                    //:
-                    //"; addr->dump();
+                    // llvm::errs() << "calloc address : "; addr->dump();
                     ObjectPair op;
                     bool success = executor->getMemoryObject(op, state, state.currentThread->addressSpace, addr);
                     if (success) {
                       const MemoryObject *mo = op.first;
-                      //												llvm::errs()
-                      //<< "calloc address ; " << mo->address
-                      //<< " calloc size : " << mo->size << "\n";
+                      // llvm::errs() << "calloc address ; " << mo->address << " calloc size : " << mo->size << "\n";
                       ObjectState *os = executor->bindObjectInState(state, mo, isLocal);
                       os->initializeToRandom();
                       executor->bindLocal(ki, state, mo->getBaseExpr());
@@ -588,54 +579,92 @@ void ListenerService::startControl(Executor *executor) {
   pushListener(Taintlistener);
 
   unsigned traceNum = executor->executionNum;
-  llvm::errs() << "\n";
-  llvm::errs() << "************************************************************************\n";
-  llvm::errs() << "第" << traceNum << "次执行,路径文件为trace" << traceNum << ".txt";
+  llvm::errs() << "KLEEM: TRACE EXECUTION: " << traceNum << "th execution, ";
   if (traceNum == 1) {
-    llvm::errs() << " 初始执行"
-                 << "\n";
+    llvm::errs() << "initial run";
   } else {
-    llvm::errs() << " 前缀执行,前缀文件为prefix" << executor->prefix->getName() << ".txt"
-                 << "\n";
+    llvm::errs() << "prefix-guided execution, prefix is " << executor->prefix->getName();
   }
-  llvm::errs() << "************************************************************************\n";
   llvm::errs() << "\n";
 
   gettimeofday(&start, NULL);
 }
 
+void ListenerService::taintAnalysis() {
+  gettimeofday(&start, NULL);
+  dtam = new DTAM(&rdManager);
+  dtam->dtam();
+  gettimeofday(&finish, NULL);
+  cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
+  rdManager.DTAMCost += cost;
+  rdManager.allDTAMCost.push_back(cost);
+
+  gettimeofday(&start, NULL);
+  encode->PTS();
+  gettimeofday(&finish, NULL);
+  cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
+  rdManager.PTSCost += cost;
+  rdManager.allPTSCost.push_back(cost);
+
+  Trace *trace = rdManager.getCurrentTrace();
+  int size;
+  size = trace->Send_Data_Expr.size();
+  rdManager.Send_Data.push_back(size);
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMSerial.find(send) != trace->DTAMSerial.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Serial.push_back(size);
+  for (auto send : trace->Send_Data_Expr) {
+    for (auto pts : trace->taintPTS) {
+      if (pts == send) {
+        size++;
+      };
+    }
+  }
+  rdManager.Send_Data_PTS.push_back(size);
+
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMParallel.find(send) != trace->DTAMParallel.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Parallel.push_back(size);
+
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMhybrid.find(send) != trace->DTAMhybrid.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Hybrid.push_back(size);
+}
+
 void ListenerService::endControl(Executor *executor) {
 
-#if DEBUG_RUNTIME
-  // true: output to file; false: output to terminal
-  rdManager.printCurrentTrace(true);
-  //			encode.showInitTrace();//need to be modified
-#endif
-  unsigned traceNum = executor->executionNum;
   if (executor->execStatus != Executor::SUCCESS) {
-    llvm::errs() << "######################执行有错误,放弃本次执行##############\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Failed to execute, abandon this execution.\n";
     executor->isFinished = true;
     return;
   } else if (!rdManager.isCurrentTraceUntested()) {
     rdManager.getCurrentTrace()->traceType = Trace::REDUNDANT;
-    llvm::errs() << "######################本条路径为旧路径####################\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a old path.\n";
   } else {
-    llvm::errs() << "######################本条路径为新路径####################\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a new path.\n";
     rdManager.getCurrentTrace()->traceType = Trace::UNIQUE;
     Trace *trace = rdManager.getCurrentTrace();
 
     unsigned allGlobal = 0;
-    std::map<std::string, std::vector<Event *>> &writeSet = trace->writeSet;
-    std::map<std::string, std::vector<Event *>> &readSet = trace->readSet;
-    for (std::map<std::string, std::vector<Event *>>::iterator nit = readSet.begin(), nie = readSet.end(); nit != nie;
-         ++nit) {
-      allGlobal += nit->second.size();
+    for (auto read : trace->readSet) {
+      allGlobal += read.second.size();
     }
-    for (std::map<std::string, std::vector<Event *>>::iterator nit = writeSet.begin(), nie = writeSet.end(); nit != nie;
-         ++nit) {
-      std::string varName = nit->first;
+    for (auto write : trace->writeSet) {
+      std::string varName = write.first;
       if (trace->readSet.find(varName) == trace->readSet.end()) {
-        allGlobal += nit->second.size();
+        allGlobal += write.second.size();
       }
     }
     rdManager.allGlobal += allGlobal;
@@ -648,82 +677,25 @@ void ListenerService::endControl(Executor *executor) {
     gettimeofday(&start, NULL);
     encode = new Encode(&rdManager);
     encode->buildifAndassert();
-    if (encode->verify()) {
-      encode->check_if();
-    }
+#if PRINT_DETAILED_TRACE
+    std::cerr << "KLEEM: DEBUG: Display trace details.\n";
+    rdManager.printCurrentTrace(false);
+    std::cerr << "KLEEM: DEBUG: Trace infomation is over.\n";
+#endif
+    encode->check_if();
     gettimeofday(&finish, NULL);
     cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
     rdManager.solvingCost += cost;
 
-    gettimeofday(&start, NULL);
-    dtam = new DTAM(&rdManager);
-    dtam->dtam();
-    gettimeofday(&finish, NULL);
-    cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-    rdManager.DTAMCost += cost;
-    rdManager.allDTAMCost.push_back(cost);
-
-    gettimeofday(&start, NULL);
-    encode->PTS();
-    gettimeofday(&finish, NULL);
-    cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-    rdManager.PTSCost += cost;
-    rdManager.allPTSCost.push_back(cost);
-
-    int size;
-    size = trace->Send_Data_Expr.size();
-    rdManager.Send_Data.push_back(size);
-    size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMSerial.find(*it) != trace->DTAMSerial.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Serial.push_back(size);
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      for (std::vector<std::string>::iterator itt = trace->taintPTS.begin(), iee = trace->taintPTS.end(); itt != iee;
-           itt++) {
-        if ((*itt) == (*it)) {
-          size++;
-        };
-      }
-    }
-    rdManager.Send_Data_PTS.push_back(size);
-
-    size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMParallel.find(*it) != trace->DTAMParallel.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Parallel.push_back(size);
-
-    size = 0;
-    for (std::set<std::string>::iterator it = trace->Send_Data_Expr.begin(), ie = trace->Send_Data_Expr.end(); it != ie;
-         it++) {
-      if (trace->DTAMhybrid.find(*it) != trace->DTAMhybrid.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Hybrid.push_back(size);
-
-    delete encode;
-    delete dtam;
+#if DO_DSTAM
+    std::cerr << "KLEEM: DSTAM: Carry on taint analysis.\n";
+    taintAnalysis();
+    std::cerr << "KLEEM: DSTAM: Taint analysis is over.\n";
+#endif
   }
 
-  executor->getNewPrefix();
-
-  for (std::vector<BitcodeListener *>::iterator bit = bitcodeListeners.begin(), bie = bitcodeListeners.end();
-       bit != bie; ++bit) {
-    //			delete *bit;
+  while(!bitcodeListeners.empty()) {
     bitcodeListeners.pop_back();
-  }
-
-  if (executor->executionNum >= 70) {
-    executor->isFinished = true;
   }
 }
 

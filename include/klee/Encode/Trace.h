@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+using namespace llvm;
 namespace klee {
 
 // added by xdzhang
@@ -51,7 +52,7 @@ public:
   unsigned Id;
   unsigned nextEventId;
   // all event, sorted by threadId and event Id
-  std::vector<std::vector<Event *> *> eventList;
+  std::vector<std::vector<Event *>> eventList;
   std::vector<std::string> abstract;
   std::stringstream ss;
   // original execution trace
@@ -68,10 +69,11 @@ public:
   std::vector<ref<klee::Expr>> assertSymbolicExpr;
   std::vector<ref<klee::Expr>> pathCondition;
   std::vector<ref<klee::Expr>> pathConditionRelatedToBranch;
-  std::vector<std::set<std::string> *> brRelatedSymbolicExpr;
-  std::vector<std::set<std::string> *> assertRelatedSymbolicExpr;
+  std::vector<std::set<std::string>> brRelatedSymbolicExpr;
+  std::vector<std::set<std::string>> assertRelatedSymbolicExpr;
   std::set<std::string> RelatedSymbolicExpr;
-  std::map<std::string, std::set<std::string> *> allRelatedSymbolicExpr;
+  // 目前发现，没有必要放到这个类中，可以考虑放到FilterSymbolicExpr类中。
+  std::map<std::string, std::set<std::string>> allRelatedSymbolicExprs;
   std::map<std::string, long> varThread;
   std::vector<Event *> rwEvent;
   std::vector<Event *> brEvent;
@@ -112,6 +114,7 @@ public:
   void insertArgc(int argc);
   void insertReadSet(std::string name, Event *item);
   void insertWriteSet(std::string name, Event *item);
+  // This function is deprecated, should remove it later.
   Event *createEvent(unsigned threadId, KInstruction *inst, uint64_t address, bool isLoad, int time,
                      Event::EventType eventType);
   Event *createEvent(unsigned threadId, KInstruction *inst, Event::EventType eventType);
@@ -125,10 +128,9 @@ public:
   void printPrintfParam(llvm::raw_ostream &out);
   void printGlobalVariableLast(llvm::raw_ostream &out);
   void printGlobalVariableInitializer(llvm::raw_ostream &out);
-  void print(bool file);
+  void printExecutionTrace(raw_ostream &out);
+  void printDetailedInfo(raw_ostream &out);
 
-  // bool operator==(Trace* another);
-  // void calculateAccessVector(std::vector<Event*>& prefix);
   void createAbstract();
   bool isEqual(Trace *trace);
 

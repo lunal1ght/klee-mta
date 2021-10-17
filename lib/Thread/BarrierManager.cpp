@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "BarrierManager.h"
+#include "klee/Thread/BarrierManager.h"
 
 #include <iostream>
 

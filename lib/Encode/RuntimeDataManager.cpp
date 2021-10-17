@@ -50,8 +50,8 @@ RuntimeDataManager::RuntimeDataManager() : currentTrace(NULL) {
 }
 
 RuntimeDataManager::~RuntimeDataManager() {
-  for (vector<Trace *>::iterator ti = traceList.begin(), te = traceList.end(); ti != te; ti++) {
-    delete *ti;
+  for (auto trace : traceList) {
+    delete trace;
   }
   auto err = std::error_code();
   raw_fd_ostream out_to_file("./output_info/statics.txt", err, sys::fs::F_Append);
@@ -167,12 +167,23 @@ Trace *RuntimeDataManager::getCurrentTrace() {
   return currentTrace;
 }
 
-void RuntimeDataManager::addScheduleSet(Prefix *prefix) {
+void RuntimeDataManager::addToScheduleSet(Prefix *prefix) {
   scheduleSet.push_back(prefix);
 }
 
-void RuntimeDataManager::printCurrentTrace(bool file) {
-  currentTrace->print(file);
+// file--true: output to file; file--false: output to terminal
+void RuntimeDataManager::printCurrentTrace(bool toFile) {
+  if (toFile) {
+    stringstream ss;
+    ss << "./output_info/trace_" << currentTrace->Id << ".data";
+    auto err = std::error_code();
+    raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
+    currentTrace->printExecutionTrace(out);
+    currentTrace->printDetailedInfo(out);
+  } else {
+    currentTrace->printExecutionTrace(llvm::errs());
+    currentTrace->printDetailedInfo(llvm::errs());
+  }
 }
 
 Prefix *RuntimeDataManager::getNextPrefix() {

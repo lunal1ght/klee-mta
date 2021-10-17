@@ -61,189 +61,189 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
   //		Thread* thread = state.currentThread;
   //	llvm::errs() << "thread id : " << thread->threadId << " ";
   //	inst->dump();
-  if (currentEvent) {
-    switch (inst->getOpcode()) {
-      case Instruction::Load: {
-        ref<Expr> address = executor->eval(ki, 0, state).value;
-        if (address->getKind() == Expr::Concat) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
-        }
-        break;
+  if (!currentEvent) {
+    assert(0 && "Current event is null.");
+  }
+  switch (inst->getOpcode()) {
+    case Instruction::Load: {
+      ref<Expr> address = executor->eval(ki, 0, state).value;
+      if (address->getKind() == Expr::Concat) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
       }
-      case Instruction::Store: {
-        ref<Expr> address = executor->eval(ki, 1, state).value;
-        if (address->getKind() == Expr::Concat) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 1, state, value);
-        }
+      break;
+    }
+    case Instruction::Store: {
+      ref<Expr> address = executor->eval(ki, 1, state).value;
+      if (address->getKind() == Expr::Concat) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 1, state, value);
+      }
 
-        ref<Expr> value = executor->eval(ki, 0, state).value;
-        //					llvm::errs() << "value : ";
-        //					value->dump();
-        bool isTaint = value->isTaint;
-        std::vector<ref<klee::Expr>> *relatedSymbolicExpr = &(currentEvent->relatedSymbolicExpr);
-        filter.resolveTaintExpr(value, currentEvent->relatedSymbolicExpr, isTaint);
-        //			llvm::errs() << "relatedSymbolicExpr" << "\n";
-        //			for (std::vector<ref<klee::Expr> >::iterator it = relatedSymbolicExpr->begin();
-        //					it != relatedSymbolicExpr->end(); it++) {
-        //				llvm::errs() << "name : " << *it << " isTaint : " << (*it)->isTaint << "\n";
-        //			}
-        ObjectPair op;
-        executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
-        const MemoryObject *mo = op.first;
-        const ObjectState *os = op.second;
-        ObjectState *wos = state.currentStack->addressSpace->getWriteable(mo, os);
-        if (isTaint) {
-          wos->insertTaint(address);
-        } else {
-          wos->eraseTaint(address);
-        }
-        Type::TypeID id = ki->inst->getOperand(0)->getType()->getTypeID();
-        bool isFloat = 0;
-        if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
-          isFloat = 1;
-        }
-        if (currentEvent->isGlobal) {
+      ref<Expr> value = executor->eval(ki, 0, state).value;
+      //					llvm::errs() << "value : ";
+      //					value->dump();
+      bool isTaint = value->isTaint;
+      std::vector<ref<klee::Expr>> *relatedSymbolicExpr = &(currentEvent->relatedSymbolicExpr);
+      filter.resolveTaintExpr(value, currentEvent->relatedSymbolicExpr, isTaint);
+      //			llvm::errs() << "relatedSymbolicExpr" << "\n";
+      //			for (std::vector<ref<klee::Expr> >::iterator it = relatedSymbolicExpr->begin();
+      //					it != relatedSymbolicExpr->end(); it++) {
+      //				llvm::errs() << "name : " << *it << " isTaint : " << (*it)->isTaint << "\n";
+      //			}
+      ObjectPair op;
+      executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
+      const MemoryObject *mo = op.first;
+      const ObjectState *os = op.second;
+      ObjectState *wos = state.currentStack->addressSpace->getWriteable(mo, os);
+      if (isTaint) {
+        wos->insertTaint(address);
+      } else {
+        wos->eraseTaint(address);
+      }
+      Type::TypeID id = ki->inst->getOperand(0)->getType()->getTypeID();
+      bool isFloat = 0;
+      if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
+        isFloat = 1;
+      }
+      if (currentEvent->isGlobal) {
 #if PTR
-          if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
+        if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
 #else
-          if (isFloat || id == Type::IntegerTyID) {
+        if (isFloat || id == Type::IntegerTyID) {
 #endif
-            Expr::Width size = executor->getWidthForLLVMType(ki->inst->getOperand(0)->getType());
-            ref<Expr> symbolic = manualMakeTaintSymbolic(state, currentEvent->globalName, size);
+          Expr::Width size = executor->getWidthForLLVMType(ki->inst->getOperand(0)->getType());
+          ref<Expr> symbolic = manualMakeTaintSymbolic(state, currentEvent->globalName, size);
 
-            //收集TS和PTS
-            std::string varName = currentEvent->name;
-            if (isTaint) {
-              trace->DTAMSerial.insert(currentEvent->globalName);
-              manualMakeTaint(symbolic, true);
-              trace->taintSymbolicExpr.insert(varName);
-              if (trace->unTaintSymbolicExpr.find(varName) != trace->unTaintSymbolicExpr.end()) {
-                trace->unTaintSymbolicExpr.erase(varName);
-              }
-            } else {
-              if (trace->taintSymbolicExpr.find(varName) == trace->taintSymbolicExpr.end()) {
-                trace->unTaintSymbolicExpr.insert(varName);
-              }
+          //收集TS和PTS
+          std::string varName = currentEvent->name;
+          if (isTaint) {
+            trace->DTAMSerial.insert(currentEvent->globalName);
+            manualMakeTaint(symbolic, true);
+            trace->taintSymbolicExpr.insert(varName);
+            if (trace->unTaintSymbolicExpr.find(varName) != trace->unTaintSymbolicExpr.end()) {
+              trace->unTaintSymbolicExpr.erase(varName);
             }
+          } else {
+            if (trace->taintSymbolicExpr.find(varName) == trace->taintSymbolicExpr.end()) {
+              trace->unTaintSymbolicExpr.insert(varName);
+            }
+          }
 
-            //编码tp
-            ref<Expr> temp = ConstantExpr::create(0, size);
-            for (std::vector<ref<klee::Expr>>::iterator it = relatedSymbolicExpr->begin();
-                 it != relatedSymbolicExpr->end(); it++) {
-              string varFullName = filter.getGlobalName(*it);
-              ref<Expr> orExpr = manualMakeTaintSymbolic(state, varFullName, size);
-              temp = OrExpr::create(temp, orExpr);
-            }
-            ref<Expr> constraint = EqExpr::create(temp, symbolic);
-            trace->taintExpr.push_back(constraint);
-            //					llvm::errs() << constraint << "isTaint : " << isTaint << "\n" ;
+          //编码tp
+          ref<Expr> temp = ConstantExpr::create(0, size);
+          for (std::vector<ref<klee::Expr>>::iterator it = relatedSymbolicExpr->begin();
+               it != relatedSymbolicExpr->end(); it++) {
+            string varFullName = filter.getGlobalName(*it);
+            ref<Expr> orExpr = manualMakeTaintSymbolic(state, varFullName, size);
+            temp = OrExpr::create(temp, orExpr);
           }
+          ref<Expr> constraint = EqExpr::create(temp, symbolic);
+          trace->taintExpr.push_back(constraint);
+          //					llvm::errs() << constraint << "isTaint : " << isTaint << "\n" ;
         }
-        break;
       }
+      break;
+    }
 
-      case Instruction::Br: {
-        BranchInst *bi = dyn_cast<BranchInst>(inst);
-        if (!bi->isUnconditional()) {
-          ref<Expr> value1 = executor->eval(ki, 0, state).value;
-          if (value1->getKind() != Expr::Constant) {
-            Expr::Width width = value1->getWidth();
-            ref<Expr> value2;
-            if (currentEvent->brCondition == true) {
-              value2 = ConstantExpr::create(true, width);
-            } else {
-              value2 = ConstantExpr::create(false, width);
-            }
-            executor->ineval(ki, 0, state, value2);
+    case Instruction::Br: {
+      BranchInst *bi = dyn_cast<BranchInst>(inst);
+      if (!bi->isUnconditional()) {
+        ref<Expr> value1 = executor->eval(ki, 0, state).value;
+        if (value1->getKind() != Expr::Constant) {
+          Expr::Width width = value1->getWidth();
+          ref<Expr> value2;
+          if (currentEvent->brCondition == true) {
+            value2 = ConstantExpr::create(true, width);
+          } else {
+            value2 = ConstantExpr::create(false, width);
           }
+          executor->ineval(ki, 0, state, value2);
         }
-        break;
       }
-      case Instruction::Switch: {
-        ref<Expr> cond1 = executor->eval(ki, 0, state).value;
-        if (cond1->getKind() != Expr::Constant) {
-          ref<Expr> cond2 = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, cond2);
+      break;
+    }
+    case Instruction::Switch: {
+      ref<Expr> cond1 = executor->eval(ki, 0, state).value;
+      if (cond1->getKind() != Expr::Constant) {
+        ref<Expr> cond2 = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, cond2);
+      }
+      break;
+    }
+    case Instruction::Call: {
+      CallSite cs(inst);
+      ref<Expr> function = executor->eval(ki, 0, state).value;
+      if (function->getKind() == Expr::Concat) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        if (function->isTaint) {
+          value->isTaint = true;
         }
-        break;
+        executor->ineval(ki, 0, state, value);
       }
-      case Instruction::Call: {
-        CallSite cs(inst);
-        ref<Expr> function = executor->eval(ki, 0, state).value;
-        if (function->getKind() == Expr::Concat) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          if (function->isTaint) {
-            value->isTaint = true;
+      if (!currentEvent->isFunctionWithSourceCode) {
+        unsigned numArgs = cs.arg_size();
+        for (unsigned j = numArgs; j > 0; j--) {
+          ref<Expr> value = executor->eval(ki, j, state).value;
+          Type::TypeID id = cs.getArgument(j - 1)->getType()->getTypeID();
+          bool isFloat = 0;
+          if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
+            isFloat = 1;
           }
-          executor->ineval(ki, 0, state, value);
-        }
-        if (!currentEvent->isFunctionWithSourceCode) {
-          unsigned numArgs = cs.arg_size();
-          for (unsigned j = numArgs; j > 0; j--) {
-            ref<Expr> value = executor->eval(ki, j, state).value;
-            Type::TypeID id = cs.getArgument(j - 1)->getType()->getTypeID();
-            bool isFloat = 0;
-            if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
-              isFloat = 1;
-            }
-            if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
-              if (value->getKind() != Expr::Constant) {
-                ref<Expr> svalue = executor->evalCurrent(ki, j, state).value;
-                if (value->isTaint) {
-                  svalue->isTaint = true;
+          if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
+            if (value->getKind() != Expr::Constant) {
+              ref<Expr> svalue = executor->evalCurrent(ki, j, state).value;
+              if (value->isTaint) {
+                svalue->isTaint = true;
 #if DEBUG_RUNTIME
-                  llvm::errs() << "svalue->isTaint = true;"
-                               << "\n";
+                llvm::errs() << "svalue->isTaint = true;"
+                             << "\n";
 #endif
-                }
-                executor->ineval(ki, j, state, svalue);
               }
-            } else {
-              if (value->getKind() != Expr::Constant) {
-                assert(0 && "store value is symbolic and type is other");
-              }
+              executor->ineval(ki, j, state, svalue);
+            }
+          } else {
+            if (value->getKind() != Expr::Constant) {
+              assert(0 && "store value is symbolic and type is other");
             }
           }
         }
-        break;
       }
+      break;
+    }
 
-      case Instruction::GetElementPtr: {
-        KGEPInstruction *kgepi = static_cast<KGEPInstruction *>(ki);
-        ref<Expr> base = executor->eval(ki, 0, state).value;
-        if (base->getKind() != Expr::Constant) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
-        }
-        for (std::vector<std::pair<unsigned, uint64_t>>::iterator it = kgepi->indices.begin(),
-                                                                  ie = kgepi->indices.end();
-             it != ie; ++it) {
-          ref<Expr> index = executor->eval(ki, it->first, state).value;
-          if (index->getKind() != Expr::Constant) {
-            ref<Expr> value = executor->evalCurrent(ki, it->first, state).value;
-            executor->ineval(ki, it->first, state, value);
-            ref<Expr> constraint = EqExpr::create(index, value);
-            //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
-            //					llvm::errs() << "constraint : " << constraint << "\n";
-          }
-        }
-        if (kgepi->offset) {
-        }
-        break;
+    case Instruction::GetElementPtr: {
+      KGEPInstruction *kgepi = static_cast<KGEPInstruction *>(ki);
+      ref<Expr> base = executor->eval(ki, 0, state).value;
+      if (base->getKind() != Expr::Constant) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
       }
-      case Instruction::PtrToInt: {
-        ref<Expr> arg = executor->eval(ki, 0, state).value;
-        if (arg->getKind() != Expr::Constant) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
+      for (std::vector<std::pair<unsigned, uint64_t>>::iterator it = kgepi->indices.begin(), ie = kgepi->indices.end();
+           it != ie; ++it) {
+        ref<Expr> index = executor->eval(ki, it->first, state).value;
+        if (index->getKind() != Expr::Constant) {
+          ref<Expr> value = executor->evalCurrent(ki, it->first, state).value;
+          executor->ineval(ki, it->first, state, value);
+          ref<Expr> constraint = EqExpr::create(index, value);
+          //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
+          //					llvm::errs() << "constraint : " << constraint << "\n";
         }
-        break;
       }
-      default: {
-        break;
+      if (kgepi->offset) {
       }
+      break;
+    }
+    case Instruction::PtrToInt: {
+      ref<Expr> arg = executor->eval(ki, 0, state).value;
+      if (arg->getKind() != Expr::Constant) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
+      }
+      break;
+    }
+    default: {
+      break;
     }
   }
 }
@@ -273,9 +273,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
             Expr::Width size = executor->getWidthForLLVMType(ki->inst->getType());
             ref<Expr> symbolic = manualMakeTaintSymbolic(state, currentEvent->globalName, size);
             executor->getDestCell(state, ki).value = symbolic;
-            //							llvm::errs() << "globalVarFullName : " << currentEvent->globalVarFullName
-            //<<
-            //"\n";
+            // llvm::errs() << "globalVarFullName : " << currentEvent->globalVarFullName << "\n";
           }
         }
         ref<Expr> address = executor->eval(ki, 0, state).value;
@@ -305,9 +303,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
         if (currentEvent->isGlobal) {
           for (unsigned i = 0; i < thread->vectorClock.size(); i++) {
             currentEvent->vectorClock.push_back(thread->vectorClock[i]);
-            //							llvm::errs() << "vectorClock " << i << " : " << currentEvent->vectorClock[i]
-            //<<
-            //"\n";
+            // llvm::errs() << "vectorClock " << i << " : " << currentEvent->vectorClock[i] << "\n";
           }
         }
         break;
@@ -326,8 +322,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
           }
           if (isTaint) {
 #if DEBUG_RUNTIME
-            llvm::errs() << "executor->getDestCell(state, ki).value->isTaint = true;"
-                         << "\n";
+            llvm::errs() << "executor->getDestCell(state, ki).value->isTaint = true;" << "\n";
 #endif
             executor->getDestCell(state, ki).value->isTaint = true;
           }

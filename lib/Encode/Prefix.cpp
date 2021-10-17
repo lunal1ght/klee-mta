@@ -79,7 +79,6 @@ void Prefix::print(ostream &out) {
     }
     out << endl;
   }
-  out << "prefix print finished\n";
 }
 
 void Prefix::print(raw_ostream &out) {
@@ -93,7 +92,6 @@ void Prefix::print(raw_ostream &out) {
     }
     out << '\n';
   }
-  out << "prefix print finished\n";
 }
 
 KInstruction *Prefix::getCurrentInst() {

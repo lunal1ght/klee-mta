@@ -14,6 +14,7 @@
 #include "klee/Encode/Transfer.h"
 #include "klee/Expr/Expr.h"
 #include "klee/Module/KModule.h"
+#include "klee/Config/DebugMacro.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/CallSite.h"
@@ -41,10 +42,9 @@ PSOListener::PSOListener(Executor *executor, RuntimeDataManager *rdManager)
 }
 
 PSOListener::~PSOListener() {
-  for (map<uint64_t, BarrierInfo *>::iterator bri = barrierRecord.begin(), bre = barrierRecord.end(); bri != bre;
-       bri++) {
-    if (bri->second) {
-      delete bri->second;
+  for (auto bri : barrierRecord) {
+    if (bri.second) {
+      delete bri.second;
     }
   }
 }
@@ -80,7 +80,6 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
   } else {
     item = trace->createEvent(thread->threadId, ki, Event::IGNORE);
   }
-  // llvm::errs() << "PSO event name : " << item->eventName << "\n";
 
   // the virtual event which should be inserted before/behind item
   vector<Event *> frontVirtualEvents, backVirtualEvents;
@@ -495,8 +494,7 @@ void PSOListener::afterExecuteInstruction(ExecutionState &state, KInstruction *k
         ConstantExpr *pidConstant = dyn_cast<ConstantExpr>(pid);
         uint64_t pidInt = pidConstant->getZExtValue();
         trace->insertThreadCreateOrJoin(make_pair(currentEvent, pidInt), true);
-        //					llvm::errs() << "PSO pthread_create event name : " << currentEvent->eventName
-        //<< " pid : " << pid << "\n";
+        // llvm::errs() << "pthread_create : " << currentEvent->eventName << " pid : " << pid << "\n";
       }
       break;
     }

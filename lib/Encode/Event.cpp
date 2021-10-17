@@ -32,35 +32,32 @@ Event::Event(unsigned threadId, unsigned eventId, string eventName, KInstruction
 
 Event::~Event() {}
 
-// modified by xdzhang
 string Event::toString() {
   stringstream ss;
-  ss << eventName << ": #Tid = " << threadId << "\n";
-  ss << "#Eid = " << eventId << "\n";
+  ss << eventName << ": #Tid = " << threadId << ", ";
+  ss << "#Eid = " << eventId << ", ";
+  ss << " #Function = " << inst->inst->getParent()->getParent()->getName().str() << ", ";
+  ss << " #Location = " << inst->info->file << "@" << inst->info->line << ", ";
   string instStr;
   raw_string_ostream str(instStr);
   inst->inst->print(str);
-  ss << " #Inst:" << instStr << "\n";
-  ss << " #name = " << name;
+  ss << " #Inst:" << instStr;
   if (isGlobal)
-    ss << " #globalName = " << globalName;
-  ss << "\n";
+    ss << ", #globalName = " << globalName;
   if (isConditionInst) {
-    ss << " #CondChoose = " << brCondition << "\n";
+    ss << ", #CondChoose = " << brCondition;
   }
-  if (isFunctionWithSourceCode) {
-    ss << " #FunctionWithSourceCode = YES"
-       << "\n";
-  }
-  ss << " #Function = " << inst->inst->getParent()->getParent()->getName().str() << "\n";
-  ss << " #Path = " << inst->info->file << "@" << inst->info->line << "\n";
-  ss << " #EventType = ";
-  if (eventType == Event::IGNORE)
-    ss << "IGNORE\n";
-  else if (eventType == Event::NORMAL)
-    ss << "NORMAL\n";
-  else
-    ss << "VIRTURL\n";
+  ss << "\n";
+  // if (isFunctionWithSourceCode) {
+  //   ss << " #FunctionWithSourceCode = YES" << "\n";
+  // }
+  // ss << " #EventType = ";
+  // if (eventType == Event::IGNORE)
+  //   ss << "IGNORE\n";
+  // else if (eventType == Event::NORMAL)
+  //   ss << "NORMAL\n";
+  // else
+  //   ss << "VIRTURL\n";
 
   return ss.str();
 }

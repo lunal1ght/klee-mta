@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SymbolicListener.h"
+#include "klee/Encode/SymbolicListener.h"
 
 #include <algorithm>
 #include <cassert>
@@ -26,8 +26,8 @@
 
 #include "../Core/Executor.h"
 #include "../Core/Memory.h"
-#include "../Thread/StackFrame.h"
-#include "Trace.h"
+#include "klee/Thread/StackFrame.h"
+#include "klee/Encode/Trace.h"
 #include "klee/Module/Cell.h"
 #include "klee/Module/InstructionInfoTable.h"
 #include "klee/Module/KModule.h"
@@ -76,291 +76,282 @@ void SymbolicListener::beforeExecuteInstruction(ExecutionState &state, KInstruct
   Trace *trace = rdManager->getCurrentTrace();
   currentEvent = trace->path.back();
 
-  if (currentEvent) {
-    Instruction *inst = ki->inst;
-    //		Thread* thread = state.currentThread;
-    //		llvm::errs() << "event name : " << currentEvent->eventName << " ";
-    //		llvm::errs() << "thread
-    //		llvm::errs() << "thread id : " << currentEvent->threadId ;
-    //		currentEvent->inst->inst->dump();
-    switch (inst->getOpcode()) {
-      case Instruction::Load: {
-        ref<Expr> address = executor->eval(ki, 0, state).value;
-        if (address->getKind() == Expr::Concat) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
-        }
-        break;
+  if (!currentEvent) {
+    assert(0 && "Current event is null.");
+  }
+  Instruction *inst = ki->inst;
+  switch (inst->getOpcode()) {
+    case Instruction::Load: {
+      ref<Expr> address = executor->eval(ki, 0, state).value;
+      if (address->getKind() == Expr::Concat) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
       }
-      case Instruction::Store: {
-        ref<Expr> address = executor->eval(ki, 1, state).value;
-        if (address->getKind() == Expr::Concat) {
-          ref<Expr> value = executor->evalCurrent(ki, 1, state).value;
-          executor->ineval(ki, 1, state, value);
-        }
+      break;
+    }
+    case Instruction::Store: {
+      ref<Expr> address = executor->eval(ki, 1, state).value;
+      if (address->getKind() == Expr::Concat) {
+        ref<Expr> value = executor->evalCurrent(ki, 1, state).value;
+        executor->ineval(ki, 1, state, value);
+      }
 
-        ref<Expr> value = executor->eval(ki, 0, state).value;
-        Type::TypeID id = ki->inst->getOperand(0)->getType()->getTypeID();
-        //			llvm::errs() << "store value : " << value << "\n";
-        //			llvm::errs() << "store base : " << base << "\n";
-        //			llvm::errs() << "value->getKind() : " << value->getKind() << "\n";
-        //			llvm::errs() << "TypeID id : " << id << "\n";
-        bool isFloat = 0;
-        if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
-          isFloat = 1;
-        }
-        if (currentEvent->isGlobal) {
-          if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
-            Expr::Width size = executor->getWidthForLLVMType(ki->inst->getOperand(0)->getType());
-            //							ref<Expr> address = executor->eval(ki, 1, state).value;
-            ref<Expr> symbolic = manualMakeSymbolic(state, currentEvent->globalName, size, isFloat);
-            ref<Expr> constraint = EqExpr::create(value, symbolic);
-            trace->storeSymbolicExpr.push_back(constraint);
-            //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
-            //					llvm::errs() << "store constraint : " << constraint << "\n";
-          }
-        }
-        break;
+      ref<Expr> value = executor->eval(ki, 0, state).value;
+      Type::TypeID id = ki->inst->getOperand(0)->getType()->getTypeID();
+      bool isFloat = 0;
+      if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
+        isFloat = 1;
       }
-      case Instruction::Br: {
-        BranchInst *bi = dyn_cast<BranchInst>(inst);
-        if (!bi->isUnconditional()) {
-          unsigned isAssert = 0;
-          string fileName = ki->info->file;
-          std::map<string, std::vector<unsigned>>::iterator it = assertMap.find(fileName);
-          unsigned line = ki->info->line;
-          if (it != assertMap.end()) {
-            if (find(assertMap[fileName].begin(), assertMap[fileName].end(), line) != assertMap[fileName].end()) {
-              isAssert = 1;
-            }
+      if (currentEvent->isGlobal) {
+        if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
+          Expr::Width size = executor->getWidthForLLVMType(ki->inst->getOperand(0)->getType());
+          //							ref<Expr> address = executor->eval(ki, 1, state).value;
+          ref<Expr> symbolic = manualMakeSymbolic(state, currentEvent->globalName, size, isFloat);
+          ref<Expr> constraint = EqExpr::create(value, symbolic);
+          trace->storeSymbolicExpr.push_back(constraint);
+          //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
+          //					llvm::errs() << "store constraint : " << constraint << "\n";
+        }
+      }
+      break;
+    }
+    case Instruction::Br: {
+      BranchInst *bi = dyn_cast<BranchInst>(inst);
+      if (!bi->isUnconditional()) {
+        unsigned isAssert = 0;
+        string fileName = ki->info->file;
+        std::map<string, std::vector<unsigned>>::iterator it = assertMap.find(fileName);
+        unsigned line = ki->info->line;
+        if (it != assertMap.end()) {
+          if (find(assertMap[fileName].begin(), assertMap[fileName].end(), line) != assertMap[fileName].end()) {
+            isAssert = 1;
           }
-          ref<Expr> value1 = executor->eval(ki, 0, state).value;
-          if (value1->getKind() != Expr::Constant) {
-            Expr::Width width = value1->getWidth();
-            ref<Expr> value2;
-            if (currentEvent->brCondition == true) {
-              value2 = ConstantExpr::create(true, width);
-            } else {
-              value2 = ConstantExpr::create(false, width);
-            }
-            ref<Expr> constraint = EqExpr::create(value1, value2);
-            if (isAssert) {
+        }
+        ref<Expr> value1 = executor->eval(ki, 0, state).value;
+        if (value1->getKind() != Expr::Constant) {
+          Expr::Width width = value1->getWidth();
+          ref<Expr> value2;
+          if (currentEvent->brCondition == true) {
+            value2 = ConstantExpr::create(true, width);
+          } else {
+            value2 = ConstantExpr::create(false, width);
+          }
+          ref<Expr> constraint = EqExpr::create(value1, value2);
+          if (isAssert) {
 #if DEBUGSYMBOLIC
-              errs() << "event name : " << currentEvent->eventName << "\n";
-              errs() << "assert constraint : " << constraint << "\n";
+            errs() << "event name : " << currentEvent->eventName << "\n";
+            errs() << "assert constraint : " << constraint << "\n";
 #endif
-              trace->assertSymbolicExpr.push_back(constraint);
-              trace->assertEvent.push_back(currentEvent);
-            } else if (kleeBr == false) {
+            trace->assertSymbolicExpr.push_back(constraint);
+            trace->assertEvent.push_back(currentEvent);
+          } else if (kleeBr == false) {
 #if DEBUGSYMBOLIC
-              errs() << "event name : " << currentEvent->eventName << "\n";
-              errs() << "br constraint : " << constraint << "\n";
+            errs() << "event name : " << currentEvent->eventName << "\n";
+            errs() << "br constraint : " << constraint << "\n";
 #endif
-              trace->brSymbolicExpr.push_back(constraint);
-              trace->brEvent.push_back(currentEvent);
-            }
-            executor->ineval(ki, 0, state, value2);
-          }
-          if (kleeBr == true) {
-            kleeBr = false;
-          }
-        }
-        break;
-      }
-      case Instruction::Switch: {
-        ref<Expr> cond1 = executor->eval(ki, 0, state).value;
-        if (cond1->getKind() != Expr::Constant) {
-          ref<Expr> cond2 = executor->evalCurrent(ki, 0, state).value;
-          ref<Expr> constraint = EqExpr::create(cond1, cond2);
-          trace->brSymbolicExpr.push_back(constraint);
-          trace->brEvent.push_back(currentEvent);
-          executor->ineval(ki, 0, state, cond2);
-        }
-        break;
-      }
-      case Instruction::Call: {
-        CallSite cs(inst);
-        ref<Expr> function = executor->eval(ki, 0, state).value;
-        if (function->getKind() != Expr::Constant) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
-        }
-        //			llvm::errs()<<"isFunctionWithSourceCode : ";
-        //					currentEvent->inst->inst->dump();
-        //			llvm::errs()<<"isFunctionWithSourceCode : ";
-        //					inst->dump();
-        //			llvm::errs()<<"isFunctionWithSourceCode :
-        //"<<currentEvent->isFunctionWithSourceCode<<"\n";
-        if (!currentEvent->isFunctionWithSourceCode) {
-          unsigned numArgs = cs.arg_size();
-          for (unsigned j = numArgs; j > 0; j--) {
-            ref<Expr> value = executor->eval(ki, j, state).value;
-            Type::TypeID id = cs.getArgument(j - 1)->getType()->getTypeID();
-            //					llvm::errs() << "value->getKind() : " << value->getKind() << "\n";
-            //					llvm::errs() << "TypeID id : " << id << "\n";
-            //		    		llvm::errs()<<"value : " << value << "\n";
-            bool isFloat = 0;
-            if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
-              isFloat = 1;
-            }
-            if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
-              if (value->getKind() != Expr::Constant) {
-                ref<Expr> svalue = executor->evalCurrent(ki, j, state).value;
-                executor->ineval(ki, j, state, svalue);
-              }
-            } else {
-              if (value->getKind() != Expr::Constant) {
-                assert(0 && "store value is symbolic and type is other");
-              }
-            }
-          }
-        }
-        break;
-      }
-      case Instruction::GetElementPtr: {
-        KGEPInstruction *kgepi = static_cast<KGEPInstruction *>(ki);
-        ref<Expr> base = executor->eval(ki, 0, state).value;
-        if (base->getKind() != Expr::Constant) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
-        }
-        //					llvm::errs() << "kgepi->base : " << base << "\n";
-        for (std::vector<std::pair<unsigned, uint64_t>>::iterator it = kgepi->indices.begin(),
-                                                                  ie = kgepi->indices.end();
-             it != ie; ++it) {
-          ref<Expr> index = executor->eval(ki, it->first, state).value;
-          //					llvm::errs() << "kgepi->index : " << index << "\n";
-          //					llvm::errs() << "first : " << *first << "\n";
-          if (index->getKind() != Expr::Constant) {
-            ref<Expr> value = executor->evalCurrent(ki, it->first, state).value;
-            executor->ineval(ki, it->first, state, value);
-            ref<Expr> constraint = EqExpr::create(index, value);
-            //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
-            //					llvm::errs() << "constraint : " << constraint << "\n";
             trace->brSymbolicExpr.push_back(constraint);
             trace->brEvent.push_back(currentEvent);
           }
+          executor->ineval(ki, 0, state, value2);
         }
-        if (kgepi->offset) {
-          //						llvm::errs() << "kgepi->offset : " << kgepi->offset << "\n";
-          //目前没有这种情况...
-          //						assert(0 && "kgepi->offset");
+        if (kleeBr == true) {
+          kleeBr = false;
         }
-        break;
       }
-      case Instruction::PtrToInt: {
-        ref<Expr> arg = executor->eval(ki, 0, state).value;
-        if (arg->getKind() != Expr::Constant) {
-          ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
-          executor->ineval(ki, 0, state, value);
+      break;
+    }
+    case Instruction::Switch: {
+      ref<Expr> cond1 = executor->eval(ki, 0, state).value;
+      if (cond1->getKind() != Expr::Constant) {
+        ref<Expr> cond2 = executor->evalCurrent(ki, 0, state).value;
+        ref<Expr> constraint = EqExpr::create(cond1, cond2);
+        trace->brSymbolicExpr.push_back(constraint);
+        trace->brEvent.push_back(currentEvent);
+        executor->ineval(ki, 0, state, cond2);
+      }
+      break;
+    }
+    case Instruction::Call: {
+      CallSite cs(inst);
+      ref<Expr> function = executor->eval(ki, 0, state).value;
+      if (function->getKind() != Expr::Constant) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
+      }
+      //			llvm::errs()<<"isFunctionWithSourceCode : ";
+      //					currentEvent->inst->inst->dump();
+      //			llvm::errs()<<"isFunctionWithSourceCode : ";
+      //					inst->dump();
+      //			llvm::errs()<<"isFunctionWithSourceCode :
+      //"<<currentEvent->isFunctionWithSourceCode<<"\n";
+      if (!currentEvent->isFunctionWithSourceCode) {
+        unsigned numArgs = cs.arg_size();
+        for (unsigned j = numArgs; j > 0; j--) {
+          ref<Expr> value = executor->eval(ki, j, state).value;
+          Type::TypeID id = cs.getArgument(j - 1)->getType()->getTypeID();
+          //					llvm::errs() << "value->getKind() : " << value->getKind() << "\n";
+          //					llvm::errs() << "TypeID id : " << id << "\n";
+          //		    		llvm::errs()<<"value : " << value << "\n";
+          bool isFloat = 0;
+          if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
+            isFloat = 1;
+          }
+          if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
+            if (value->getKind() != Expr::Constant) {
+              ref<Expr> svalue = executor->evalCurrent(ki, j, state).value;
+              executor->ineval(ki, j, state, svalue);
+            }
+          } else {
+            if (value->getKind() != Expr::Constant) {
+              assert(0 && "store value is symbolic and type is other");
+            }
+          }
         }
-        break;
       }
-      default: {
-        break;
+      break;
+    }
+    case Instruction::GetElementPtr: {
+      KGEPInstruction *kgepi = static_cast<KGEPInstruction *>(ki);
+      ref<Expr> base = executor->eval(ki, 0, state).value;
+      if (base->getKind() != Expr::Constant) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
       }
+      //					llvm::errs() << "kgepi->base : " << base << "\n";
+      for (std::vector<std::pair<unsigned, uint64_t>>::iterator it = kgepi->indices.begin(), ie = kgepi->indices.end();
+           it != ie; ++it) {
+        ref<Expr> index = executor->eval(ki, it->first, state).value;
+        //					llvm::errs() << "kgepi->index : " << index << "\n";
+        //					llvm::errs() << "first : " << *first << "\n";
+        if (index->getKind() != Expr::Constant) {
+          ref<Expr> value = executor->evalCurrent(ki, it->first, state).value;
+          executor->ineval(ki, it->first, state, value);
+          ref<Expr> constraint = EqExpr::create(index, value);
+          //					llvm::errs() << "event name : " << currentEvent->eventName << "\n";
+          //					llvm::errs() << "constraint : " << constraint << "\n";
+          trace->brSymbolicExpr.push_back(constraint);
+          trace->brEvent.push_back(currentEvent);
+        }
+      }
+      if (kgepi->offset) {
+        //						llvm::errs() << "kgepi->offset : " << kgepi->offset << "\n";
+        //目前没有这种情况...
+        //						assert(0 && "kgepi->offset");
+      }
+      break;
+    }
+    case Instruction::PtrToInt: {
+      ref<Expr> arg = executor->eval(ki, 0, state).value;
+      if (arg->getKind() != Expr::Constant) {
+        ref<Expr> value = executor->evalCurrent(ki, 0, state).value;
+        executor->ineval(ki, 0, state, value);
+      }
+      break;
+    }
+    default: {
+      break;
     }
   }
 }
 
 void SymbolicListener::afterExecuteInstruction(ExecutionState &state, KInstruction *ki) {
   Trace *trace = rdManager->getCurrentTrace();
-  if (currentEvent) {
-    Instruction *inst = ki->inst;
-    Thread *thread = state.currentThread;
-    switch (inst->getOpcode()) {
-      case Instruction::Load: {
-        //			llvm::errs() << "value : " << value << "\n";
+  if (!currentEvent) {
+    assert(0 && "Current event is null.");
+  }
+  Instruction *inst = ki->inst;
+  Thread *thread = state.currentThread;
+  switch (inst->getOpcode()) {
+    case Instruction::Load: {
+      //			llvm::errs() << "value : " << value << "\n";
+      bool isFloat = 0;
+      Type::TypeID id = ki->inst->getType()->getTypeID();
+      if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
+        isFloat = 1;
+      }
+      if (currentEvent->isGlobal) {
+
+        //指针！！！
+#if PTR
+        if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
+#else
+        if (isFloat || id == Type::IntegerTyID) {
+#endif
+          Expr::Width size = executor->getWidthForLLVMType(ki->inst->getType());
+          ref<Expr> value = executor->getDestCell(state, ki).value;
+          ref<Expr> symbolic = manualMakeSymbolic(state, currentEvent->globalName, size, isFloat);
+          executor->bindLocal(ki, state, symbolic);
+          // llvm::errs() << "load globalVarFullName : " << currentEvent->globalVarFullName << "\n";
+          // llvm::errs() << "load value : " << value << "\n";
+          ref<Expr> constraint = EqExpr::create(value, symbolic);
+          // llvm::errs() << "rwSymbolicExpr : " << constraint << "\n";
+          trace->rwSymbolicExpr.push_back(constraint);
+          trace->rwEvent.push_back(currentEvent);
+        }
+      }
+      if (isFloat) {
+        thread->stack->realStack.back().locals[ki->dest].value.get()->isFloat = true;
+      }
+      break;
+    }
+
+    case Instruction::Store: {
+      break;
+    }
+    case Instruction::Call: {
+      CallSite cs(inst);
+      Function *f = currentEvent->calledFunction;
+      //可能存在未知错误
+      //					Value *fp = cs.getCalledValue();
+      //					Function *f = executor->getTargetFunction(fp, state);
+      //					if (!f) {
+      //						ref<Expr> expr = executor->eval(ki, 0, state).value;
+      //						ConstantExpr* constExpr = dyn_cast<ConstantExpr>(expr.get());
+      //						uint64_t functionPtr = constExpr->getZExtValue();
+      //						f = (Function*) functionPtr;
+      //					}
+
+      if (!currentEvent->isFunctionWithSourceCode && !inst->getType()->isVoidTy()) {
+        ref<Expr> returnValue = executor->getDestCell(state, ki).value;
         bool isFloat = 0;
-        Type::TypeID id = ki->inst->getType()->getTypeID();
+        Type::TypeID id = inst->getType()->getTypeID();
         if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
           isFloat = 1;
         }
-        if (currentEvent->isGlobal) {
-
-          //指针！！！
-#if PTR
-          if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
-#else
-          if (isFloat || id == Type::IntegerTyID) {
-#endif
-            Expr::Width size = executor->getWidthForLLVMType(ki->inst->getType());
-            ref<Expr> value = executor->getDestCell(state, ki).value;
-            ref<Expr> symbolic = manualMakeSymbolic(state, currentEvent->globalName, size, isFloat);
-            executor->bindLocal(ki, state, symbolic);
-            //							llvm::errs() << "load globalVarFullName : " << currentEvent->globalVarFullName <<
-            //"\n"; 							llvm::errs() << "load value : " << value << "\n";
-            ref<Expr> constraint = EqExpr::create(value, symbolic);
-            //							llvm::errs() << "rwSymbolicExpr : " << constraint <<
-            //"\n";
-            trace->rwSymbolicExpr.push_back(constraint);
-            trace->rwEvent.push_back(currentEvent);
-          }
-        }
         if (isFloat) {
-          thread->stack->realStack.back().locals[ki->dest].value.get()->isFloat = true;
+          returnValue.get()->isFloat = true;
         }
-        break;
+        executor->bindLocal(ki, state, returnValue);
       }
+      //			if (!executor->kmodule->functionMap[f] && !inst->getType()->isVoidTy()) {
+      //				ref<Expr> value = executor->getDestCell(state, ki).value;
+      //				llvm::errs() << "value : " << value << "\n";
+      //			}
+      if (f->getName().startswith("klee_div_zero_check")) {
+        kleeBr = true;
+      } else if (f->getName().startswith("klee_overshift_check")) {
+        kleeBr = true;
+      }
+      break;
+    }
+    case Instruction::PHI: {
+      //			ref<Expr> result = executor->eval(ki, thread->incomingBBIndex, state).value;
+      //			llvm::errs() << "PHI : " << result << "\n";
+      break;
+    }
+    case Instruction::GetElementPtr: {
+      //			ref<Expr> value = executor->getDestCell(state, ki).value;
+      //			llvm::errs() << "value : " << value << "\n";
+      break;
+    }
+    case Instruction::SExt: {
+      //			ref<Expr> value = executor->getDestCell(state, ki).value;
+      //			llvm::errs() << "value : " << value << "\n";
+      break;
+    }
+    default: {
 
-      case Instruction::Store: {
-        break;
-      }
-      case Instruction::Call: {
-        CallSite cs(inst);
-        Function *f = currentEvent->calledFunction;
-        //可能存在未知错误
-        //					Value *fp = cs.getCalledValue();
-        //					Function *f = executor->getTargetFunction(fp, state);
-        //					if (!f) {
-        //						ref<Expr> expr = executor->eval(ki, 0, state).value;
-        //						ConstantExpr* constExpr = dyn_cast<ConstantExpr>(expr.get());
-        //						uint64_t functionPtr = constExpr->getZExtValue();
-        //						f = (Function*) functionPtr;
-        //					}
-
-        if (!currentEvent->isFunctionWithSourceCode && !inst->getType()->isVoidTy()) {
-          ref<Expr> returnValue = executor->getDestCell(state, ki).value;
-          bool isFloat = 0;
-          Type::TypeID id = inst->getType()->getTypeID();
-          if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
-            isFloat = 1;
-          }
-          if (isFloat) {
-            returnValue.get()->isFloat = true;
-          }
-          executor->bindLocal(ki, state, returnValue);
-        }
-        //			if (!executor->kmodule->functionMap[f] && !inst->getType()->isVoidTy()) {
-        //				ref<Expr> value = executor->getDestCell(state, ki).value;
-        //				llvm::errs() << "value : " << value << "\n";
-        //			}
-        if (f->getName().startswith("klee_div_zero_check")) {
-          kleeBr = true;
-        } else if (f->getName().startswith("klee_overshift_check")) {
-          kleeBr = true;
-        }
-        break;
-      }
-      case Instruction::PHI: {
-        //			ref<Expr> result = executor->eval(ki, thread->incomingBBIndex, state).value;
-        //			llvm::errs() << "PHI : " << result << "\n";
-        break;
-      }
-      case Instruction::GetElementPtr: {
-        //			ref<Expr> value = executor->getDestCell(state, ki).value;
-        //			llvm::errs() << "value : " << value << "\n";
-        break;
-      }
-      case Instruction::SExt: {
-        //			ref<Expr> value = executor->getDestCell(state, ki).value;
-        //			llvm::errs() << "value : " << value << "\n";
-        break;
-      }
-      default: {
-
-        break;
-      }
+      break;
     }
   }
 }

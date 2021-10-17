@@ -12,13 +12,13 @@
 #include "klee/Encode/KQuery2Z3.h"
 #include "klee/Expr/Expr.h"
 #include "llvm/ADT/APFloat.h"
+#include "klee/Config/DebugMacro.h"
 
 using namespace klee;
 using namespace z3;
 
 #define EPSILON 0.00001
 #define BIT_WIDTH 64
-#define INT_ARITHMETIC 0
 
 // constructor
 KQuery2Z3::KQuery2Z3(std::vector<ref<Expr>> &_kqueryExpr, z3::context &_z3_ctx)

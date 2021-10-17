@@ -82,15 +82,16 @@ typedef unsigned TypeSize;
 #endif
 #include "llvm/Support/raw_ostream.h"
 
-#include "../Encode/Event.h"
-#include "../Encode/Prefix.h"
-#include "../Encode/RuntimeDataManager.h"
-#include "../Encode/Trace.h"
-#include "../Encode/Transfer.h"
-#include "../Thread/MutexManager.h"
-#include "../Thread/StackFrame.h"
-#include "../Thread/Thread.h"
-#include "../Thread/ThreadScheduler.h"
+#include "klee/Encode/Event.h"
+#include "klee/Encode/Prefix.h"
+#include "klee/Encode/RuntimeDataManager.h"
+#include "klee/Encode/Trace.h"
+#include "klee/Encode/Transfer.h"
+#include "klee/Thread/MutexManager.h"
+#include "klee/Thread/StackFrame.h"
+#include "klee/Thread/Thread.h"
+#include "klee/Thread/ThreadScheduler.h"
+#include "klee/Config/DebugMacro.h"
 #include "CallPathManager.h"
 
 #include <algorithm>
@@ -469,7 +470,8 @@ Executor::Executor(LLVMContext &ctx, const InterpreterOptions &opts,
       pathWriter(0), symPathWriter(0), specialFunctionHandler(0), timers{time::Span(TimerInterval)},
       replayKTest(0), replayPath(0), usingSeeds(0),
       atMemoryLimit(false), inhibitForking(false), haltExecution(false),
-      ivcEnabled(false), debugLogBuffer(debugBufferString) {
+      ivcEnabled(false), debugLogBuffer(debugBufferString), 
+      isFinished(false), prefix(NULL), executionNum(0), execStatus(SUCCESS){
 
 
   const time::Span maxTime{MaxTime};
@@ -3727,8 +3729,7 @@ void Executor::run(ExecutionState &initialState) {
         return;
       }
 
-      std::map<ExecutionState *, std::vector<SeedInfo>>::iterator it =
-          seedMap.upper_bound(lastState);
+      std::map<ExecutionState *, std::vector<SeedInfo>>::iterator it = seedMap.upper_bound(lastState);
       if (it == seedMap.end())
         it = seedMap.begin();
       lastState = it->first;
@@ -3808,13 +3809,12 @@ void Executor::run(ExecutionState &initialState) {
                            << thread->pc->info->file << "/"
                            << thread->pc->info->line << " "
                            << thread->pc->inst->getOpcodeName() << "\n";
-              thread->pc->inst->dump();
+              // thread->pc->inst->dump();
               llvm::errs() << "thread state is MUTEX_BLOCKED, try to get lock "
                               "but failed\n";
               isAbleToRun = false;
               break;
-              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but
-              // failed");
+              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but failed");
             }
             state.reSchedule();
             thread = state.getNextThread();
@@ -4218,7 +4218,6 @@ void Executor::callExternalFunction(ExecutionState &state,
     else
       klee_warning_once(function, "%s", os.str().c_str());
   }
-
   bool success = externalDispatcher->executeCall(function, target->inst, args);
   if (!success) {
     terminateStateOnError(state, "failed external call: " + function->getName(),
@@ -5136,6 +5135,7 @@ bool Executor::isFunctionSpecial(Function *f) {
 }
 
 void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **envp) {
+  llvm::errs() << "--Info: Iteritive verification started.\n";
   while (!isFinished && execStatus != RUNTIMEERROR) {
     execStatus = SUCCESS;
     listenerService->startControl(this);
@@ -5143,26 +5143,25 @@ void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **
     listenerService->endControl(this);
     prepareNextExecution();
   }
+  llvm::errs() << "--Info: Iteritive verification teiminated.\n";
 }
 
 void Executor::prepareNextExecution() {
   for (std::set<ExecutionState *>::const_iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
     delete *it;
   }
+  prepareNewPrefix();
 }
 
-void Executor::getNewPrefix() {
+void Executor::prepareNewPrefix() {
   //获取新的前缀
-  Prefix *prefix = listenerService->getRuntimeDataManager()->getNextPrefix();
-  if (prefix) {
+  Prefix *pref = listenerService->getRuntimeDataManager()->getNextPrefix();
+  if (pref) {
     delete this->prefix;
-    this->prefix = prefix;
+    this->prefix = pref;
     isFinished = false;
   } else {
     isFinished = true;
-#if PRINT_RUNTIMEINFO
-    printPrefix();
-#endif
   }
 }
 

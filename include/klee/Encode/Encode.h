@@ -100,9 +100,10 @@ private:
   bool taintReadFromInitFormula(Event *read, expr &ret);
 
   void computePrefix(vector<Event *> &vecEvent, Event *ifEvent);
-  void showPrefixInfo(Prefix *prefix, Event *ifEvent);
+  void printPrefixInfo(Prefix *prefix, Event *ifEvent);
+  void printSolvingSolution(Prefix *prefix, expr ifExpr);
 
-  void printSourceLine(string path, vector<struct Pair *> &eventIndexPair);
+  void printSourceLine(string path, vector<pair<int, Event *>> &eventIndexPair);
   void printSourceLine(string path, vector<Event *> &trace);
   string readLine(string filename, unsigned line);
   bool isAssert(string filename, unsigned line);
@@ -111,7 +112,7 @@ private:
   void logStatisticInfo();
 
   void controlGranularity(int level);
-
+  std::string solvingInfo(check_result result);
   expr makeOrTaint(ref<klee::Expr> value);
 };
 
