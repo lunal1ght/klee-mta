@@ -41,13 +41,13 @@ string Event::toString() {
   string instStr;
   raw_string_ostream str(instStr);
   inst->inst->print(str);
-  ss << " #Inst:" << instStr << "\n";
+  ss << " #Inst:" << instStr;
   if (isGlobal)
-    ss << " #globalName = " << globalName;
-  ss << "\n";
+    ss << ", #globalName = " << globalName;
   if (isConditionInst) {
-    ss << " #CondChoose = " << brCondition << "\n";
+    ss << ", #CondChoose = " << brCondition;
   }
+  ss << "\n";
   // if (isFunctionWithSourceCode) {
   //   ss << " #FunctionWithSourceCode = YES" << "\n";
   // }

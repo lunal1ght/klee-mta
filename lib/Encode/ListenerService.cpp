@@ -47,6 +47,8 @@ ListenerService::~ListenerService() {
   for (auto listener : bitcodeListeners) {
     delete listener;
   }
+  delete encode;
+  delete dtam;
 }
 
 void ListenerService::pushListener(BitcodeListener *bitcodeListener) { bitcodeListeners.push_back(bitcodeListener); }
@@ -577,34 +579,81 @@ void ListenerService::startControl(Executor *executor) {
   pushListener(Taintlistener);
 
   unsigned traceNum = executor->executionNum;
-  llvm::errs() << "\n";
-  llvm::errs() << "************************************************************************\n";
-  llvm::errs() << "第" << traceNum << "次执行,路径文件为trace" << traceNum << ".txt";
+  llvm::errs() << "KLEEM: TRACE EXECUTION: " << traceNum << "th execution, ";
   if (traceNum == 1) {
-    llvm::errs() << " 初始执行 \n";
+    llvm::errs() << "initial run";
   } else {
-    llvm::errs() << " 前缀执行, 前缀文件为 prefix" << executor->prefix->getName() << ".txt \n";
+    llvm::errs() << "prefix-guided execution, prefix is " << executor->prefix->getName();
   }
-  llvm::errs() << "************************************************************************\n";
   llvm::errs() << "\n";
 
   gettimeofday(&start, NULL);
 }
 
+void ListenerService::taintAnalysis() {
+  gettimeofday(&start, NULL);
+  dtam = new DTAM(&rdManager);
+  dtam->dtam();
+  gettimeofday(&finish, NULL);
+  cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
+  rdManager.DTAMCost += cost;
+  rdManager.allDTAMCost.push_back(cost);
+
+  gettimeofday(&start, NULL);
+  encode->PTS();
+  gettimeofday(&finish, NULL);
+  cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
+  rdManager.PTSCost += cost;
+  rdManager.allPTSCost.push_back(cost);
+
+  Trace *trace = rdManager.getCurrentTrace();
+  int size;
+  size = trace->Send_Data_Expr.size();
+  rdManager.Send_Data.push_back(size);
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMSerial.find(send) != trace->DTAMSerial.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Serial.push_back(size);
+  for (auto send : trace->Send_Data_Expr) {
+    for (auto pts : trace->taintPTS) {
+      if (pts == send) {
+        size++;
+      };
+    }
+  }
+  rdManager.Send_Data_PTS.push_back(size);
+
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMParallel.find(send) != trace->DTAMParallel.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Parallel.push_back(size);
+
+  size = 0;
+  for (auto send : trace->Send_Data_Expr) {
+    if (trace->DTAMhybrid.find(send) != trace->DTAMhybrid.end()) {
+      size++;
+    };
+  }
+  rdManager.Send_Data_Hybrid.push_back(size);
+}
+
 void ListenerService::endControl(Executor *executor) {
 
   if (executor->execStatus != Executor::SUCCESS) {
-    llvm::errs() << "######################执行有错误,放弃本次执行##############\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Failed to execute, abandon this execution.\n";
     executor->isFinished = true;
     return;
   } else if (!rdManager.isCurrentTraceUntested()) {
     rdManager.getCurrentTrace()->traceType = Trace::REDUNDANT;
-    llvm::errs() << "######################本条路径为旧路径####################\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a old path.\n";
   } else {
-#if PRINT_CURRENT_TRACE
-    rdManager.printCurrentTrace(false);
-#endif
-    llvm::errs() << "######################本条路径为新路径####################\n";
+    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a new path.\n";
     rdManager.getCurrentTrace()->traceType = Trace::UNIQUE;
     Trace *trace = rdManager.getCurrentTrace();
 
@@ -628,72 +677,26 @@ void ListenerService::endControl(Executor *executor) {
     gettimeofday(&start, NULL);
     encode = new Encode(&rdManager);
     encode->buildifAndassert();
+#if PRINT_DETAILED_TRACE
+    std::cerr << "KLEEM: DEBUG: Display trace details.\n";
+    rdManager.printCurrentTrace(false);
+    std::cerr << "KLEEM: DEBUG: Trace infomation is over.\n";
+#endif
     encode->check_if();
     gettimeofday(&finish, NULL);
     cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
     rdManager.solvingCost += cost;
 
-    // gettimeofday(&start, NULL);
-    // dtam = new DTAM(&rdManager);
-    // dtam->dtam();
-    // gettimeofday(&finish, NULL);
-    // cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-    // rdManager.DTAMCost += cost;
-    // rdManager.allDTAMCost.push_back(cost);
-
-    gettimeofday(&start, NULL);
-    encode->PTS();
-    gettimeofday(&finish, NULL);
-    cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-    rdManager.PTSCost += cost;
-    rdManager.allPTSCost.push_back(cost);
-
-    int size;
-    size = trace->Send_Data_Expr.size();
-    rdManager.Send_Data.push_back(size);
-    size = 0;
-    for (auto send : trace->Send_Data_Expr) {
-      if (trace->DTAMSerial.find(send) != trace->DTAMSerial.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Serial.push_back(size);
-    for (auto send : trace->Send_Data_Expr) {
-      for (auto pts : trace->taintPTS) {
-        if (pts == send) {
-          size++;
-        };
-      }
-    }
-    rdManager.Send_Data_PTS.push_back(size);
-
-    size = 0;
-    for (auto send : trace->Send_Data_Expr) {
-      if (trace->DTAMParallel.find(send) != trace->DTAMParallel.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Parallel.push_back(size);
-
-    size = 0;
-    for (auto send : trace->Send_Data_Expr) {
-      if (trace->DTAMhybrid.find(send) != trace->DTAMhybrid.end()) {
-        size++;
-      };
-    }
-    rdManager.Send_Data_Hybrid.push_back(size);
-
-    delete encode;
-    delete dtam;
+#if DO_DSTAM
+    std::cerr << "KLEEM: DSTAM: Carry on taint analysis.\n";
+    taintAnalysis();
+    std::cerr << "KLEEM: DSTAM: Taint analysis is over.\n";
+#endif
   }
 
   while(!bitcodeListeners.empty()) {
     bitcodeListeners.pop_back();
   }
-
-  // if (executor->executionNum >= 70) {
-  //   executor->isFinished = true;
-  // }
 }
 
 } // namespace klee

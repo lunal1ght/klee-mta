@@ -48,7 +48,7 @@ Trace::~Trace() {
 }
 
 void Trace::printDetailedInfo(raw_ostream &out) {
-  printAllEvent(out);
+  // printAllEvent(out);
   printThreadCreateAndJoin(out);
   printReadSetAndWriteSet(out);
   printWaitAndSignal(out);
@@ -103,23 +103,22 @@ void Trace::printWaitAndSignal(raw_ostream &out) {
 void Trace::printReadSetAndWriteSet(raw_ostream &out) {
   out << "< Global Read Events >\n";
   for (map<string, vector<Event *>>::iterator ri = readSet.begin(), re = readSet.end(); ri != re; ri++) {
-    out << ri->first << " is readed at "
-        << "\n";
+    out << ri->first << " is readed at: " << "\n";
     for (vector<Event *>::iterator vi = ri->second.begin(), ve = ri->second.end(); vi != ve; vi++) {
-      out << (*vi)->toString() << "\n";
+      out << (*vi)->toString();
     }
   }
-  out << "< Global Write Events>\n";
+  out << "\n< Global Write Events>\n";
   for (map<string, vector<Event *>>::iterator wi = writeSet.begin(), we = writeSet.end(); wi != we; wi++) {
-    out << wi->first << " is writed at \n";
+    out << wi->first << " is writed at: \n";
     for (vector<Event *>::iterator vi = wi->second.begin(), ve = wi->second.end(); vi != ve; vi++) {
-      out << (*vi)->toString() << "\n";
+      out << (*vi)->toString();
     }
   }
 }
 
 void Trace::printLockAndUnlock(raw_ostream &out) {
-  out << "< lock-unlock Event Pairs>\n";
+  out << "< Lock-Unlock Event Pairs>\n";
   for (map<string, vector<LockPair *>>::iterator li = all_lock_unlock.begin(), le = all_lock_unlock.end(); li != le;
        li++) {
     out << "Mutex:" << li->first << ":\n";
@@ -143,7 +142,7 @@ void Trace::printBarrierOperation(raw_ostream &out) {
 }
 
 void Trace::printPrintfParam(raw_ostream &out) {
-  out << "<----all_printf_param---->\n";
+  out << "< printf param >\n";
   for (map<string, Constant *>::iterator pi = printf_variable_value.begin(), pe = printf_variable_value.end(); pi != pe;
        pi++) {
     out << "Variable:" << pi->first << "\n";
@@ -153,7 +152,7 @@ void Trace::printPrintfParam(raw_ostream &out) {
 }
 
 void Trace::printGlobalVariableLast(raw_ostream &out) {
-  out << "<----all_global_variable_last---->\n";
+  out << "< Global variable last >\n";
   for (map<string, Constant *>::iterator gi = global_variable_final.begin(), ge = global_variable_final.end(); gi != ge;
        gi++) {
     out << "Variable:" << gi->first << "\n";
@@ -173,8 +172,8 @@ void Trace::printGlobalVariableInitializer(raw_ostream &out) {
   }
 }
 
-void Trace::printExecutionPath(raw_ostream &out) {
-  out << "< Execution Path >\n";
+void Trace::printExecutionTrace(raw_ostream &out) {
+  out << "< Execution Trace >\n";
   for(auto event : path) {
     out << event->toString();
   }

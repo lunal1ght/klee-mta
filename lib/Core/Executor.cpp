@@ -5150,18 +5150,15 @@ void Executor::prepareNextExecution() {
   for (std::set<ExecutionState *>::const_iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
     delete *it;
   }
-  getNewPrefix();
+  prepareNewPrefix();
 }
 
-void Executor::getNewPrefix() {
+void Executor::prepareNewPrefix() {
   //获取新的前缀
   Prefix *pref = listenerService->getRuntimeDataManager()->getNextPrefix();
   if (pref) {
     delete this->prefix;
     this->prefix = pref;
-#if PRINT_PREFIX
-    prefix->print(llvm::errs());
-#endif
     isFinished = false;
   } else {
     isFinished = true;

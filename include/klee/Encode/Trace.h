@@ -72,6 +72,7 @@ public:
   std::vector<std::set<std::string>> brRelatedSymbolicExpr;
   std::vector<std::set<std::string>> assertRelatedSymbolicExpr;
   std::set<std::string> RelatedSymbolicExpr;
+  // 目前发现，没有必要放到这个类中，可以考虑放到FilterSymbolicExpr类中。
   std::map<std::string, std::set<std::string>> allRelatedSymbolicExprs;
   std::map<std::string, long> varThread;
   std::vector<Event *> rwEvent;
@@ -127,7 +128,7 @@ public:
   void printPrintfParam(llvm::raw_ostream &out);
   void printGlobalVariableLast(llvm::raw_ostream &out);
   void printGlobalVariableInitializer(llvm::raw_ostream &out);
-  void printExecutionPath(raw_ostream &out);
+  void printExecutionTrace(raw_ostream &out);
   void printDetailedInfo(raw_ostream &out);
 
   void createAbstract();

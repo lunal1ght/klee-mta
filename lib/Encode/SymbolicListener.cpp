@@ -80,11 +80,6 @@ void SymbolicListener::beforeExecuteInstruction(ExecutionState &state, KInstruct
     assert(0 && "Current event is null.");
   }
   Instruction *inst = ki->inst;
-  //		Thread* thread = state.currentThread;
-  //		llvm::errs() << "event name : " << currentEvent->eventName << " ";
-  //		llvm::errs() << "thread
-  //		llvm::errs() << "thread id : " << currentEvent->threadId ;
-  //		currentEvent->inst->inst->dump();
   switch (inst->getOpcode()) {
     case Instruction::Load: {
       ref<Expr> address = executor->eval(ki, 0, state).value;
@@ -103,10 +98,6 @@ void SymbolicListener::beforeExecuteInstruction(ExecutionState &state, KInstruct
 
       ref<Expr> value = executor->eval(ki, 0, state).value;
       Type::TypeID id = ki->inst->getOperand(0)->getType()->getTypeID();
-      //			llvm::errs() << "store value : " << value << "\n";
-      //			llvm::errs() << "store base : " << base << "\n";
-      //			llvm::errs() << "value->getKind() : " << value->getKind() << "\n";
-      //			llvm::errs() << "TypeID id : " << id << "\n";
       bool isFloat = 0;
       if ((id >= Type::HalfTyID) && (id <= Type::DoubleTyID)) {
         isFloat = 1;

@@ -18,8 +18,6 @@
 #include "klee/Encode/Trace.h"
 #include "klee/Expr/Expr.h"
 
-#define FILTER_DEBUG 0
-
 namespace klee {
 
 class FilterSymbolicExpr {

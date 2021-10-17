@@ -100,7 +100,8 @@ private:
   bool taintReadFromInitFormula(Event *read, expr &ret);
 
   void computePrefix(vector<Event *> &vecEvent, Event *ifEvent);
-  void showPrefixInfo(Prefix *prefix, Event *ifEvent);
+  void printPrefixInfo(Prefix *prefix, Event *ifEvent);
+  void printSolvingSolution(Prefix *prefix, expr ifExpr);
 
   void printSourceLine(string path, vector<pair<int, Event *>> &eventIndexPair);
   void printSourceLine(string path, vector<Event *> &trace);

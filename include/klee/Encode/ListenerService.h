@@ -54,6 +54,8 @@ public:
 
   void startControl(Executor *executor);
   void endControl(Executor *executor);
+
+  void taintAnalysis();
 };
 
 } // namespace klee

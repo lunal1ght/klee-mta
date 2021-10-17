@@ -48,8 +48,6 @@
 #define BUFFERSIZE 300
 #define BIT_WIDTH 64
 
-#define INT_ARITHMETIC 0
-
 #define OPTIMIZATION2 1
 #define OPTIMIZATION3 1
 
@@ -59,6 +57,13 @@ using namespace z3;
 namespace klee {
 
 void Encode::buildAllFormula() {
+#if PRINT_FORMULA
+  std::cerr << "KLEEM: DEBUG: Display kinds of constaint formulas.\n";
+#endif
+  // Prepare
+  // level: 0 bitcode; 1 source code; 2 block
+  controlGranularity(2);
+
   buildInitValueFormula(z3_solver);
   buildPathCondition(z3_solver);
   buildMemoryModelFormula(z3_solver);
@@ -96,11 +101,8 @@ void Encode::buildPTSFormula() {
 
 // true :: assert can't be violated. false :: assert can be violated.
 bool Encode::verify() {
-#if PRINT_FORMULA
-  showInitTrace();
-#endif
   std::cerr << "\nVerify this trace.\n";
-#if PRINT_FORMULA
+#if PRINT_ASSERT_INFO
   stringstream ss;
   ss << "./output_info/"
      << "Trace" << trace->Id << ".z3expr";
@@ -173,21 +175,15 @@ bool Encode::verify() {
       runtimeData->addToScheduleSet(prefix);
       std::cerr << "Assert Failure at " << assertFormula[i].first->inst->info->file << ": "
                 << assertFormula[i].first->inst->info->line << "\n";
-#if PRINT_FORMULA
-      showPrefixInfo(prefix, assertFormula[i].first);
-      std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
-      out_file << "!assertFormula[i].second : " << !assertFormula[i].second << "\n";
-      out_file << "\n" << z3_solver << "\n";
-      model m = z3_solver.get_model();
-      out_file << "\nz3_solver.get_model()\n";
-      out_file << "\n" << m << "\n";
-      out_file.close();
+#if PRINT_SOLVING_RESULT
+      printPrefixInfo(prefix, assertFormula[i].first);
+      printSolvingSolution(prefix, assertFormula[i].second);
 #endif
       // 如果有一个assert失效，则返回false
       return false;
     }
     z3_solver.pop(); // backtrack point 2
-#if PRINT_BRANCH_INFO
+#if PRINT_ASSERT_INFO
     stringstream ss;
     ss << "Trace" << trace->Id << "#"
        << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
@@ -215,19 +211,20 @@ std::string Encode::solvingInfo(check_result result) {
 void Encode::check_if() {
   unsigned sum = 0;
   unsigned size = ifFormula.size();
-  std::cerr << "Sum of branches: " << size << "\n";
-  for (unsigned i = 0; i < ifFormula.size(); i++) {
 #if PRINT_BRANCH_INFO
+  std::cerr << "KLEEM: PATH EXPLORATION: Current trace has" << size << "branches.\n";
+#endif
+  for (unsigned i = 0; i < ifFormula.size(); i++) {
     stringstream ss;
-    ss << "Trace" << trace->Id
-       << "-L"
-       << ifFormula[i].first->inst->info->line << "-" << ifFormula[i].first->eventName << "-"
-       << "[" << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "]";
-    std::cerr << "Flip branch " << ss.str() << ": ";
+    ss << "Trace" << trace->Id << "-L" << ifFormula[i].first->inst->info->line << "-" 
+       << ifFormula[i].first->eventName << "-"
+       <<  ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition);
+    std::string prefixName = ss.str();
+#if PRINT_BRANCH_INFO
+    std::cerr << "KLEEM: PATH EXPLORATION: Flip branch " << prefixName << ", ";
 #endif
     // create a backstracking point
     z3_solver.push();
- 
 #if !OPTIMIZATION2
     bool presolve = filter.filterUselessWithSet(trace, trace->brRelatedSymbolicExpr[i]);
 #else
@@ -292,30 +289,20 @@ void Encode::check_if() {
       gettimeofday(&finish, NULL);
       double cost =
           (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
-#if PRINT_BRANCH_INFO
-      std::cerr << "Cost: " << cost << "s ";
-#endif
+
       solvingTimes++;
       if (result == z3::sat) {
         vector<Event *> vecEvent;
         computePrefix(vecEvent, ifFormula[i].first);
-        Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, ss.str());
+        Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, prefixName);
         // printf prefix to DIR output_info
         runtimeData->addToScheduleSet(prefix);
         runtimeData->satBranch++;
         runtimeData->satCost += cost;
         sum++;
-#if PRINT_FORMULA
-        showPrefixInfo(prefix, ifFormula[i].first);
-        stringstream output;
-        output << "./output_info/" << prefix->getName() << ".z3expr";
-        std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
-        out_file << "!ifFormula[i].second : " << !ifFormula[i].second << "\n";
-        out_file << "\n" << z3_solver << "\n";
-        model m = z3_solver.get_model();
-        out_file << "\nz3_solver.get_model()\n";
-        out_file << "\n" << m << "\n";
-        out_file.close();
+#if PRINT_SOLVING_RESULT
+        printPrefixInfo(prefix, ifFormula[i].first);
+        printSolvingSolution(prefix, ifFormula[i].second);
 #endif
       } else {
         runtimeData->unSatBranchBySolve++;
@@ -323,12 +310,13 @@ void Encode::check_if() {
       }
 
 #if PRINT_BRANCH_INFO
+      std::cerr << "spend " << cost << "(s) ";
       if (result == z3::sat) {
-        std::cerr << "Success!\n";
+        std::cerr << "Success.\n";
       } else if (result == z3::unsat) {
-        std::cerr << "Failed!\n";
+        std::cerr << "Failed.\n";
       } else
-        std::cerr << "Warning!\n";
+        std::cerr << "Warning.\n";
 #endif
 
     } else {
@@ -529,7 +517,7 @@ void Encode::computePrefix(vector<Event *> &vecEvent, Event *ifEvent) {
   }
 }
 
-void Encode::showPrefixInfo(Prefix *prefix, Event *ifEvent) {
+void Encode::printPrefixInfo(Prefix *prefix, Event *ifEvent) {
   vector<Event *> *orderedEventList = prefix->getEventList();
   unsigned size = orderedEventList->size();
   model m = z3_solver.get_model();
@@ -566,9 +554,19 @@ void Encode::showPrefixInfo(Prefix *prefix, Event *ifEvent) {
   //	printSourceLine(filename, eventOrderPair);
 }
 
-/*
- * called by showInitTrace to print initial trace
- */
+void Encode::printSolvingSolution(Prefix *prefix, expr ifExpr) {
+  stringstream output;
+  output << "./output_info/" << prefix->getName() << ".z3expr";
+  std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
+  out_file << "!ifFormula[i].second : " << !ifExpr << "\n";
+  out_file << "\n" << z3_solver << "\n";
+  model m = z3_solver.get_model();
+  out_file << "\nz3_solver.get_model()\n";
+  out_file << "\n" << m << "\n";
+  out_file.close();
+}
+
+/// called by showInitTrace to print initial trace
 void Encode::printSourceLine(string path, vector<Event *> &trace) {
   string output;
   auto err = std::error_code();
@@ -879,7 +877,6 @@ void Encode::buildPathCondition(solver z3_solver_pc) {
 #endif
 
   KQuery2Z3 *kq = new KQuery2Z3(z3_ctx);
-  ;
   unsigned int totalExpr = trace->pathConditionRelatedToBranch.size();
   for (unsigned int i = 0; i < totalExpr; i++) {
     z3::expr temp = kq->getZ3Expr(trace->pathConditionRelatedToBranch[i]);
@@ -892,8 +889,8 @@ void Encode::buildPathCondition(solver z3_solver_pc) {
 
 void Encode::buildifAndassert() {
   Trace *trace = runtimeData->getCurrentTrace();
-#if FILTER_DEBUG
-  std::cerr << "all constraint :" << std::endl;
+#if FILTER_USELESS_DEBUG
+  std::cerr << "Before Filtering:" << std::endl;
   std::cerr << "storeSymbolicExpr = " << trace->storeSymbolicExpr.size() << std::endl;
   for (std::vector<ref<Expr>>::iterator it = trace->storeSymbolicExpr.begin(), ie = trace->storeSymbolicExpr.end();
        it != ie; ++it) {
@@ -911,8 +908,8 @@ void Encode::buildifAndassert() {
   }
 #endif
   filter.filterUseless(trace);
-#if FILTER_DEBUG
-  std::cerr << "all constraint :" << std::endl;
+#if FILTER_USELESS_DEBUG
+  std::cerr << "After Filtering:" << std::endl;
   std::cerr << "pathCondition = " << trace->pathCondition.size() << std::endl;
   for (std::vector<ref<Expr>>::iterator it = trace->pathCondition.begin(), ie = trace->pathCondition.end(); it != ie;
        ++it) {
@@ -1121,9 +1118,6 @@ void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
   z3_solver_mm.add(z3_ctx.int_const("E_INIT") == 0);
   // statics
   formulaNum++;
-  // level: 0 bitcode; 1 source code; 2 block
-  controlGranularity(2);
-  //
   // initial and final
   for (unsigned tid = 0; tid < trace->eventList.size(); tid++) {
     std::vector<Event *> &thread = trace->eventList[tid];

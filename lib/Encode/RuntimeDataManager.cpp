@@ -178,11 +178,11 @@ void RuntimeDataManager::printCurrentTrace(bool toFile) {
     ss << "./output_info/trace_" << currentTrace->Id << ".data";
     auto err = std::error_code();
     raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
+    currentTrace->printExecutionTrace(out);
     currentTrace->printDetailedInfo(out);
-    currentTrace->printExecutionPath(out);
   } else {
+    currentTrace->printExecutionTrace(llvm::errs());
     currentTrace->printDetailedInfo(llvm::errs());
-    currentTrace->printExecutionPath(llvm::errs());
   }
 }
 

@@ -69,7 +69,6 @@ unsigned Prefix::getCurrentEventThreadId() {
 }
 
 void Prefix::print(ostream &out) {
-  out << "< Schedule prefix: " << name << " start >\n";
   for (vector<Event *>::iterator ei = eventList.begin(), ee = eventList.end(); ei != ee; ei++) {
     Event *event = *ei;
     out << "thread" << event->threadId << " " << event->inst->info->file << " " << event->inst->info->line << ": "
@@ -80,11 +79,9 @@ void Prefix::print(ostream &out) {
     }
     out << endl;
   }
-  out << "< Schedule prefix: " << name << " end >\n";
 }
 
 void Prefix::print(raw_ostream &out) {
-  out << "< Schedule prefix: " << name << " start >\n";
   for (vector<Event *>::iterator ei = eventList.begin(), ee = eventList.end(); ei != ee; ei++) {
     Event *event = *ei;
     out << "thread" << event->threadId << " " << event->inst->info->file << " " << event->inst->info->line << ": ";
@@ -95,7 +92,6 @@ void Prefix::print(raw_ostream &out) {
     }
     out << '\n';
   }
-  out << "< Schedule prefix: " << name << " end >\n";
 }
 
 KInstruction *Prefix::getCurrentInst() {

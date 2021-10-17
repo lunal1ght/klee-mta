@@ -625,7 +625,7 @@ public:
   bool isFunctionSpecial(llvm::Function *f);
   void runVerification(llvm::Function *f, int argc, char **argv, char **envp);
   void prepareNextExecution();
-  void getNewPrefix();
+  void prepareNewPrefix();
   void printInstrcution(ExecutionState &state, KInstruction *ki);
   void printPrefix();
 };
