@@ -37,8 +37,9 @@ public:
   static void addExprToVector(const std::set<std::string> &Expr, std::vector<std::string> &exprVectr);
   void addExprToRelate(const std::set<std::string> &Exprs);
   bool isRelated(std::string varName);
-  void fillterTrace(Trace *trace, std::set<std::string> allRelatedSymbolicExpr);
-  void filterUseless(Trace *trace);
+  void prepareData(Trace *trace);
+  void filterExprs(Trace *trace, std::set<std::string> allRelatedSymbolicExpr);
+  void filterUnusedExprs(Trace *trace);
   void filterUselessByTaint(Trace *trace);
   bool filterUselessWithSet(Trace *trace, std::set<std::string> &relatedSymbolicExpr);
 };

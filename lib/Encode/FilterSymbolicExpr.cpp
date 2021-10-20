@@ -168,62 +168,8 @@ bool FilterSymbolicExpr::isRelated(std::string varName) {
   }
 }
 
-void FilterSymbolicExpr::fillterTrace(Trace *trace, std::set<std::string> RelatedSymbolicExpr) {
-  std::string name;
-
-  auto &pathConditionRelatedToBranch = trace->pathConditionRelatedToBranch;
-  pathConditionRelatedToBranch.clear();
-  for (auto it : trace->pathCondition) {
-    name = getName(it.get()->getKid(1));
-    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      pathConditionRelatedToBranch.push_back(it);
-    }
-  }
-
-  auto &readSetRelatedToBranch = trace->readSetRelatedToBranch;
-  readSetRelatedToBranch.clear();
-  for (auto nit : trace->readSet) {
-    name = nit.first;
-    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      readSetRelatedToBranch[nit.first] = nit.second;
-    }
-  }
-
-  auto &writeSetRelatedToBranch = trace->writeSetRelatedToBranch;
-  writeSetRelatedToBranch.clear();
-  for (auto nit : trace->writeSet) {
-    name = nit.first;
-    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      writeSetRelatedToBranch[nit.first] = nit.second;
-    }
-  }
-
-  auto &global_variable_initisalizer_RelatedToBranch = trace->global_variable_initializer_RelatedToBranch;
-  global_variable_initisalizer_RelatedToBranch.clear();
-  for (auto nit : trace->global_variable_initializer) {
-    name = nit.first;
-    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
-      global_variable_initisalizer_RelatedToBranch[nit.first] = nit.second;
-    }
-  }
-
-  for (auto currentEvent : trace->path) {
-    if (currentEvent->isGlobal != true) {
-      continue;
-    }
-    if (currentEvent->inst->inst->getOpcode() == llvm::Instruction::Load ||
-        currentEvent->inst->inst->getOpcode() == llvm::Instruction::Store) {
-      if (RelatedSymbolicExpr.find(currentEvent->name) == RelatedSymbolicExpr.end() && OPTIMIZATION1) {
-        currentEvent->isEventRelatedToBranch = false;
-      } else {
-        currentEvent->isEventRelatedToBranch = true;
-      }
-    }
-  }
-}
-
-void FilterSymbolicExpr::filterUseless(Trace *trace) {
-  std::string name;
+void FilterSymbolicExpr::prepareData(Trace *trace) {
+std::string name;
   std::vector<std::pair<std::string, ref<klee::Expr>>> remainingExprs;
   allRelatedSymbolicExprSet.clear();
   allRelatedSymbolicExprVector.clear();
@@ -409,8 +355,85 @@ void FilterSymbolicExpr::filterUseless(Trace *trace) {
   for (auto rwExprBr : rwSymbolicExprRelatedToBranch) {
     rwSymbolicExpr.push_back(rwExprBr);
   }
+}
 
-  fillterTrace(trace, allRelatedSymbolicExprSet);
+void FilterSymbolicExpr::filterExprs(Trace *trace, std::set<std::string> RelatedSymbolicExpr) {
+  trace->pathConditionRelatedToBranch.clear();
+  for (auto it : trace->pathCondition) {
+    std::string name = getName(it.get()->getKid(1));
+    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
+      trace->pathConditionRelatedToBranch.push_back(it);
+    }
+  }
+
+  trace->readSetRelatedToBranch.clear();
+  for (auto nit : trace->readSet) {
+    std::string name = nit.first;
+    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
+      trace->readSetRelatedToBranch[nit.first] = nit.second;
+    }
+  }
+
+  trace->writeSetRelatedToBranch.clear();
+  for (auto nit : trace->writeSet) {
+    std::string name = nit.first;
+    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
+      trace->writeSetRelatedToBranch[nit.first] = nit.second;
+    }
+  }
+
+  trace->global_variable_initializer_RelatedToBranch.clear();
+  for (auto nit : trace->global_variable_initializer) {
+    std::string name = nit.first;
+    if (RelatedSymbolicExpr.find(name) != RelatedSymbolicExpr.end() || !OPTIMIZATION1) {
+      trace->global_variable_initializer_RelatedToBranch[nit.first] = nit.second;
+    }
+  }
+
+  for (auto currentEvent : trace->path) {
+    if (currentEvent->isGlobal != true) {
+      continue;
+    }
+    if (currentEvent->inst->inst->getOpcode() == llvm::Instruction::Load ||
+        currentEvent->inst->inst->getOpcode() == llvm::Instruction::Store) {
+      if (RelatedSymbolicExpr.find(currentEvent->name) == RelatedSymbolicExpr.end() && OPTIMIZATION1) {
+        currentEvent->isEventRelatedToBranch = false;
+      } else {
+        currentEvent->isEventRelatedToBranch = true;
+      }
+    }
+  }
+}
+
+void FilterSymbolicExpr::filterUnusedExprs(Trace *trace) {
+  #if FILTER_USELESS_DEBUG
+  std::cerr << "Before Filtering:" << std::endl;
+  std::cerr << "storeSymbolicExpr = " << trace->storeSymbolicExpr.size() << std::endl;
+  for (std::vector<ref<Expr>>::iterator it = trace->storeSymbolicExpr.begin(), ie = trace->storeSymbolicExpr.end();
+       it != ie; ++it) {
+    it->get()->dump();
+  }
+  std::cerr << "brSymbolicExpr = " << trace->brSymbolicExpr.size() << std::endl;
+  for (std::vector<ref<Expr>>::iterator it = trace->brSymbolicExpr.begin(), ie = trace->brSymbolicExpr.end(); it != ie;
+       ++it) {
+    it->get()->dump();
+  }
+  std::cerr << "assertSymbolicExpr = " << trace->assertSymbolicExpr.size() << std::endl;
+  for (std::vector<ref<Expr>>::iterator it = trace->assertSymbolicExpr.begin(), ie = trace->assertSymbolicExpr.end();
+       it != ie; ++it) {
+    it->get()->dump();
+  }
+#endif
+  prepareData(trace);
+  filterExprs(trace, allRelatedSymbolicExprSet);
+#if FILTER_USELESS_DEBUG
+  std::cerr << "After Filtering:" << std::endl;
+  std::cerr << "pathCondition = " << trace->pathCondition.size() << std::endl;
+  for (std::vector<ref<Expr>>::iterator it = trace->pathCondition.begin(), ie = trace->pathCondition.end(); it != ie;
+       ++it) {
+    it->get()->dump();
+  }
+#endif
 }
 
 bool FilterSymbolicExpr::filterUselessWithSet(Trace *trace, std::set<std::string> &relatedSymbolicExpr) {
@@ -434,7 +457,7 @@ bool FilterSymbolicExpr::filterUselessWithSet(Trace *trace, std::set<std::string
     }
   }
   if (branch) {
-    //		fillterTrace(trace, RelatedSymbolicExpr);
+    //		filterExprs(trace, RelatedSymbolicExpr);
     return true;
   } else {
     return false;

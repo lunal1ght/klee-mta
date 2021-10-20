@@ -122,7 +122,7 @@ ObjectState::ObjectState(const ObjectState &os)
     concreteMask(os.concreteMask ? new BitArray(*os.concreteMask, os.size) : 0),
     flushMask(os.flushMask ? new BitArray(*os.flushMask, os.size) : 0),
     knownSymbolics(0),
-    isTaint(os.isTaint),
+    taintedVars(os.taintedVars),
     updates(os.updates),
     size(os.size),
     readOnly(false) {

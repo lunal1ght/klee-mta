@@ -24,9 +24,16 @@ DTAM::DTAM(RuntimeDataManager *data) : runtimeData(data) {
   cost = 0;
 }
 
-DTAM::~DTAM() {}
+DTAM::~DTAM() {
+  for (auto &it : allWrite) {
+    delete it.second;
+  }
+  for (auto &it : allRead) {
+    delete it.second;
+  }
+}
 
-void DTAM::DTAMParallel() {
+void DTAM::prepareDTAMParallel() {
 
   for (std::map<std::string, std::vector<Event *>>::iterator it = trace->allReadSet.begin(),
                                                              ie = trace->allReadSet.end();
@@ -66,7 +73,7 @@ void DTAM::DTAMParallel() {
   }
 }
 
-void DTAM::DTAMhybrid() {
+void DTAM::prepareDTAMhybrid() {
 
   for (std::map<std::string, DTAMPoint *>::iterator it = allWrite.begin(), ie = allWrite.end(); it != ie; it++) {
     DTAMPoint *point = (*it).second;
@@ -122,18 +129,17 @@ void DTAM::propagateTaint(std::vector<DTAMPoint *> &remainPoint) {
     it--;
     DTAMPoint *point = (*it);
     remainPoint.pop_back();
-    for (std::vector<DTAMPoint *>::iterator itt = point->affectingPoint.begin(), iee = point->affectingPoint.end();
-         itt < iee; itt++) {
-      if (!(*itt)->isTaint) {
-        (*itt)->isTaint = true;
-        remainPoint.push_back((*itt));
+    for (auto point : point->affectingPoint) {
+      if (point->isTaint) {
+        continue;
       }
+      point->isTaint = true;
+      remainPoint.push_back(point);
     }
   }
 }
 
-void DTAM::getTaint(std::set<std::string> &taint) {
-
+void DTAM::logTaint(std::set<std::string> &taint) {
   for (std::map<std::string, DTAMPoint *>::iterator it = allWrite.begin(), ie = allWrite.end(); it != ie; it++) {
     DTAMPoint *point = (*it).second;
     if (point->isTaint == true) {
@@ -151,11 +157,8 @@ void DTAM::getTaint(std::set<std::string> &taint) {
   }
 }
 
-void DTAM::dtam() {
-  std::vector<DTAMPoint *> remainPoint;
-
-  for (std::set<std::string>::iterator it = trace->DTAMSerial.begin(), ie = trace->DTAMSerial.end(); it != ie; it++) {
-    std::string name = (*it);
+void DTAM::work() {
+  for (auto name : trace->DTAMSerial) {
     runtimeData->allDTAMSerialMap.insert(trace->getAssemblyLine(name));
     trace->DTAMSerialMap.insert(trace->getAssemblyLine(name));
   }
@@ -163,17 +166,15 @@ void DTAM::dtam() {
   runtimeData->DTAMSerial.push_back(trace->DTAMSerial.size());
 
   gettimeofday(&start, NULL);
-  DTAMParallel();
+  prepareDTAMParallel();
+  std::vector<DTAMPoint *> remainPoint;
   initTaint(remainPoint);
   propagateTaint(remainPoint);
-  getTaint(trace->DTAMParallel);
-  std::set<std::string> &potentialTaint = trace->potentialTaint;
-  for (std::set<std::string>::iterator it = trace->DTAMParallel.begin(), ie = trace->DTAMParallel.end(); it != ie;
-       it++) {
-    std::string name = (*it);
+  logTaint(trace->DTAMParallel);
+  for (auto name : trace->DTAMParallel) {
     runtimeData->allDTAMParallelMap.insert(trace->getAssemblyLine(name));
     trace->DTAMParallelMap.insert(trace->getAssemblyLine(name));
-    potentialTaint.insert(filter.getName(name));
+    trace->potentialTaint.insert(filter.getName(name));
   }
   runtimeData->DTAMParallelMap.push_back(trace->DTAMParallelMap.size());
   runtimeData->DTAMParallel.push_back(trace->DTAMParallel.size());
@@ -183,12 +184,11 @@ void DTAM::dtam() {
   runtimeData->allDTAMParallelCost.push_back(cost);
 
   gettimeofday(&start, NULL);
-  DTAMhybrid();
+  prepareDTAMhybrid();
   initTaint(remainPoint);
   propagateTaint(remainPoint);
-  getTaint(trace->DTAMhybrid);
-  for (std::set<std::string>::iterator it = trace->DTAMhybrid.begin(), ie = trace->DTAMhybrid.end(); it != ie; it++) {
-    std::string name = (*it);
+  logTaint(trace->DTAMhybrid);
+  for (auto name : trace->DTAMhybrid) {
     runtimeData->allDTAMhybridMap.insert(trace->getAssemblyLine(name));
     trace->DTAMhybridMap.insert(trace->getAssemblyLine(name));
   }

@@ -32,13 +32,14 @@
 #include "klee/Encode/TaintListener.h"
 #include "klee/Thread/StackType.h"
 #include "klee/Config/DebugMacro.h"
+#include "klee/Support/ErrorHandling.h"
 
 extern void *__dso_handle __attribute__((__weak__));
 
 namespace klee {
 
 ListenerService::ListenerService(Executor *executor) {
-  encode = NULL;
+  encoder = NULL;
   dtam = NULL;
   cost = 0;
 }
@@ -47,7 +48,7 @@ ListenerService::~ListenerService() {
   for (auto listener : bitcodeListeners) {
     delete listener;
   }
-  delete encode;
+  delete encoder;
   delete dtam;
 }
 
@@ -579,49 +580,46 @@ void ListenerService::startControl(Executor *executor) {
   pushListener(Taintlistener);
 
   unsigned traceNum = executor->executionNum;
-  llvm::errs() << "KLEEM: TRACE EXECUTION: " << traceNum << "th execution, ";
   if (traceNum == 1) {
-    llvm::errs() << "initial run";
+    kleem_execution("%dth execution, initial run, id: Trace%d.", traceNum, traceNum);
   } else {
-    llvm::errs() << "prefix-guided execution, prefix is " << executor->prefix->getName();
+    kleem_execution("%dth execution, prefix-guided execution, prefix is %s.", traceNum,
+                    executor->prefix->getName().c_str());
   }
-  llvm::errs() << "\n";
-
   gettimeofday(&start, NULL);
 }
 
 void ListenerService::taintAnalysis() {
   gettimeofday(&start, NULL);
   dtam = new DTAM(&rdManager);
-  dtam->dtam();
+  dtam->work();
   gettimeofday(&finish, NULL);
   cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
   rdManager.DTAMCost += cost;
   rdManager.allDTAMCost.push_back(cost);
 
   gettimeofday(&start, NULL);
-  encode->PTS();
+  encoder->symbolicTaintAnalysis();
   gettimeofday(&finish, NULL);
   cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
   rdManager.PTSCost += cost;
   rdManager.allPTSCost.push_back(cost);
 
   Trace *trace = rdManager.getCurrentTrace();
-  int size;
-  size = trace->Send_Data_Expr.size();
+  int size = trace->Send_Data_Expr.size();
   rdManager.Send_Data.push_back(size);
   size = 0;
   for (auto send : trace->Send_Data_Expr) {
     if (trace->DTAMSerial.find(send) != trace->DTAMSerial.end()) {
       size++;
-    };
+    }
   }
   rdManager.Send_Data_Serial.push_back(size);
   for (auto send : trace->Send_Data_Expr) {
     for (auto pts : trace->taintPTS) {
       if (pts == send) {
         size++;
-      };
+      }
     }
   }
   rdManager.Send_Data_PTS.push_back(size);
@@ -644,16 +642,15 @@ void ListenerService::taintAnalysis() {
 }
 
 void ListenerService::endControl(Executor *executor) {
-
   if (executor->execStatus != Executor::SUCCESS) {
-    llvm::errs() << "KLEEM: TRACE EXECUTION: Failed to execute, abandon this execution.\n";
+    kleem_execution("Failed to execute, abandon this execution.");
     executor->isFinished = true;
     return;
   } else if (!rdManager.isCurrentTraceUntested()) {
     rdManager.getCurrentTrace()->traceType = Trace::REDUNDANT;
-    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a old path.\n";
+    kleem_execution("Found a old path.");
   } else {
-    llvm::errs() << "KLEEM: TRACE EXECUTION: Found a new path.\n";
+    kleem_execution("Found a new path, id: Trace%d.", rdManager.getCurrentTrace()->Id);
     rdManager.getCurrentTrace()->traceType = Trace::UNIQUE;
     Trace *trace = rdManager.getCurrentTrace();
 
@@ -675,22 +672,20 @@ void ListenerService::endControl(Executor *executor) {
     rdManager.allDTAMSerialCost.push_back(cost);
 
     gettimeofday(&start, NULL);
-    encode = new Encode(&rdManager);
-    encode->buildifAndassert();
+    encoder = new Encode(&rdManager);
+    encoder->contraintEncoding();
 #if PRINT_DETAILED_TRACE
-    std::cerr << "KLEEM: DEBUG: Display trace details.\n";
     rdManager.printCurrentTrace(false);
-    std::cerr << "KLEEM: DEBUG: Trace infomation is over.\n";
 #endif
-    encode->check_if();
+    encoder->flipIfBranches();
     gettimeofday(&finish, NULL);
     cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
     rdManager.solvingCost += cost;
 
 #if DO_DSTAM
-    std::cerr << "KLEEM: DSTAM: Carry on taint analysis.\n";
+    kleem_dstam("Carry on taint analysis.");
     taintAnalysis();
-    std::cerr << "KLEEM: DSTAM: Taint analysis is over.\n";
+    kleem_dstam("Taint analysis is over.");
 #endif
   }
 

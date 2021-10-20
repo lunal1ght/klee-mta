@@ -81,22 +81,14 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
       }
 
       ref<Expr> value = executor->eval(ki, 0, state).value;
-      //					llvm::errs() << "value : ";
-      //					value->dump();
-      bool isTaint = value->isTaint;
       std::vector<ref<klee::Expr>> *relatedSymbolicExpr = &(currentEvent->relatedSymbolicExpr);
-      filter.resolveTaintExpr(value, currentEvent->relatedSymbolicExpr, isTaint);
-      //			llvm::errs() << "relatedSymbolicExpr" << "\n";
-      //			for (std::vector<ref<klee::Expr> >::iterator it = relatedSymbolicExpr->begin();
-      //					it != relatedSymbolicExpr->end(); it++) {
-      //				llvm::errs() << "name : " << *it << " isTaint : " << (*it)->isTaint << "\n";
-      //			}
+      filter.resolveTaintExpr(value, currentEvent->relatedSymbolicExpr, value->isTaint);
       ObjectPair op;
       executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
       const MemoryObject *mo = op.first;
       const ObjectState *os = op.second;
       ObjectState *wos = state.currentStack->addressSpace->getWriteable(mo, os);
-      if (isTaint) {
+      if (value->isTaint) {
         wos->insertTaint(address);
       } else {
         wos->eraseTaint(address);
@@ -117,7 +109,7 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
 
           //收集TS和PTS
           std::string varName = currentEvent->name;
-          if (isTaint) {
+          if (value->isTaint) {
             trace->DTAMSerial.insert(currentEvent->globalName);
             manualMakeTaint(symbolic, true);
             trace->taintSymbolicExpr.insert(varName);
@@ -196,8 +188,7 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
               if (value->isTaint) {
                 svalue->isTaint = true;
 #if DEBUG_RUNTIME
-                llvm::errs() << "svalue->isTaint = true;"
-                             << "\n";
+                llvm::errs() << "svalue->isTaint = true;" << "\n";
 #endif
               }
               executor->ineval(ki, j, state, svalue);
@@ -282,7 +273,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
         executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
         const ObjectState *os = op.second;
         bool isTaint = false;
-        if (os->isTaint.find(address) != os->isTaint.end()) {
+        if (os->taintedVars.find(address) != os->taintedVars.end()) {
           isTaint = true;
         }
         if (isTaint) {
@@ -354,7 +345,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
         } else if (f->getName().str() == "pthread_mutex_unlock") {
           //				thread->vectorClock[thread->threadId]++;
         } else if (f->getName().str() == "pthread_barrier_wait") {
-          assert(0 && "目前没做");
+          assert(0 && "Unsupported pthread function");
         }
         break;
       }
