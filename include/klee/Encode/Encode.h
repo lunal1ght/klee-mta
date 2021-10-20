@@ -47,15 +47,15 @@ public:
     runtimeData->allFormulaNum += formulaNum;
     runtimeData->solvingTimes += solvingTimes;
   }
-  void buildAllFormula();
-  void buildifAndassert();
+  void encodeBasicFormulas();
+  void contraintEncoding();
   void buildPTSFormula();
   void showInitTrace();
   void check_output();
-  void check_if();
+  void flipIfBranches();
   bool verify();
 
-  void PTS();
+  void symbolicTaintAnalysis();
 
 private:
   ////////////////////////////////modify this sagment at the end/////////////////////////
@@ -78,6 +78,8 @@ private:
   void buildOutputFormula();
 
   expr buildExprForConstantValue(Value *V, bool isLeft, string prefix);
+
+  void concretizeReadValue(Event *curr);
 
 private:
   void markLatestWriteForGlobalVar();

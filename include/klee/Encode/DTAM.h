@@ -36,12 +36,12 @@ public:
   DTAM(RuntimeDataManager *data);
   virtual ~DTAM();
 
-  void DTAMParallel();
-  void DTAMhybrid();
+  void prepareDTAMParallel();
+  void prepareDTAMhybrid();
   void initTaint(std::vector<DTAMPoint *> &remainPoint);
   void propagateTaint(std::vector<DTAMPoint *> &remainPoint);
-  void getTaint(std::set<std::string> &taint);
-  void dtam();
+  void logTaint(std::set<std::string> &taint);
+  void work();
 };
 
 } // namespace klee

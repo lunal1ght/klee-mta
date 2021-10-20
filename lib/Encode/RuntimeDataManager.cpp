@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "klee/Encode/RuntimeDataManager.h"
+#include "klee/Support/ErrorHandling.h"
 
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
@@ -173,6 +174,7 @@ void RuntimeDataManager::addToScheduleSet(Prefix *prefix) {
 
 // file--true: output to file; file--false: output to terminal
 void RuntimeDataManager::printCurrentTrace(bool toFile) {
+  kleem_debug("Display trace details.");
   if (toFile) {
     stringstream ss;
     ss << "./output_info/trace_" << currentTrace->Id << ".data";
@@ -184,6 +186,7 @@ void RuntimeDataManager::printCurrentTrace(bool toFile) {
     currentTrace->printExecutionTrace(llvm::errs());
     currentTrace->printDetailedInfo(llvm::errs());
   }
+  kleem_debug("Trace infomation is over.");
 }
 
 Prefix *RuntimeDataManager::getNextPrefix() {

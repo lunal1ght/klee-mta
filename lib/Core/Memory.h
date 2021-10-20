@@ -196,7 +196,7 @@ public:
 
   bool readOnly;
   ///@hy
-  std::set<ref<Expr> > isTaint;
+  std::set<ref<Expr> > taintedVars;
 
 public:
   /// Create a new object state for the given memory object with concrete
@@ -218,8 +218,8 @@ public:
 
   void setReadOnly(bool ro) { readOnly = ro; }
   
-  void insertTaint(ref<Expr> address) { isTaint.insert(address); }
-  void eraseTaint(ref<Expr> address) { isTaint.erase(address); }
+  void insertTaint(ref<Expr> address) { taintedVars.insert(address); }
+  void eraseTaint(ref<Expr> address) { taintedVars.erase(address); }
 
   // make contents all concrete and zero
   void initializeToZero();

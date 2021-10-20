@@ -44,21 +44,19 @@
 #include "klee/Module/InstructionInfoTable.h"
 #include "klee/Module/KInstruction.h"
 #include "klee/Config/DebugMacro.h"
+#include "klee/Support/ErrorHandling.h"
 
 #define BUFFERSIZE 300
 #define BIT_WIDTH 64
-
-#define OPTIMIZATION2 1
-#define OPTIMIZATION3 1
 
 using namespace llvm;
 using namespace std;
 using namespace z3;
 namespace klee {
 
-void Encode::buildAllFormula() {
+void Encode::encodeBasicFormulas() {
 #if PRINT_FORMULA
-  std::cerr << "KLEEM: DEBUG: Display kinds of constaint formulas.\n";
+  kleem_debug("Display kinds of constaint formulas.");
 #endif
   // Prepare
   // level: 0 bitcode; 1 source code; 2 block
@@ -75,9 +73,9 @@ void Encode::buildAllFormula() {
   try {
     result = z3_solver.check();
     if (result == z3::sat) {
-      std::cerr << "buildAllFormula success!" << "\n";
+      std::cerr << "encodeBasicFormulas success!" << "\n";
     } else {
-      std::cerr << "buildAllFormula fail!" << "\n";
+      std::cerr << "encodeBasicFormulas fail!" << "\n";
     }
   } catch (z3::exception &ex) {
     std::cerr << "\nUnexpected error: " << ex.msg() << "\n";
@@ -128,7 +126,7 @@ bool Encode::verify() {
   std::cerr << "\nThe number of assert: " << assertFormula.size() << "\n";
   for (unsigned i = 0; i < assertFormula.size(); i++) {
     z3_solver.push(); // backtrack point 2
-    buildAllFormula();
+    encodeBasicFormulas();
 
     Event *currAssert = assertFormula[i].first;
     z3_solver.add(!assertFormula[i].second);
@@ -208,55 +206,26 @@ std::string Encode::solvingInfo(check_result result) {
   return ret;
 }
 
-void Encode::check_if() {
-  unsigned sum = 0;
-  unsigned size = ifFormula.size();
-#if PRINT_BRANCH_INFO
-  std::cerr << "KLEEM: PATH EXPLORATION: Current trace has" << size << "branches.\n";
-#endif
+void Encode::flipIfBranches() {
+  kleem_exploration("Start to filp the branches on trace, totally %lu branches.", ifFormula.size());
   for (unsigned i = 0; i < ifFormula.size(); i++) {
     stringstream ss;
     ss << "Trace" << trace->Id << "-L" << ifFormula[i].first->inst->info->line << "-" 
        << ifFormula[i].first->eventName << "-"
        <<  ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition);
     std::string prefixName = ss.str();
-#if PRINT_BRANCH_INFO
-    std::cerr << "KLEEM: PATH EXPLORATION: Flip branch " << prefixName << ", ";
-#endif
     // create a backstracking point
     z3_solver.push();
-#if !OPTIMIZATION2
+#if O2
     bool presolve = filter.filterUselessWithSet(trace, trace->brRelatedSymbolicExpr[i]);
 #else
     bool presolve = true;
 #endif
-
     if (presolve) {
       Event *curr = ifFormula[i].first;
-#if !OPTIMIZATION3
-      //添加读写的解
-      std::set<std::string> &RelatedSymbolicExpr = trace->RelatedSymbolicExpr;
-      std::vector<ref<klee::Expr>> &rwSymbolicExpr = trace->rwSymbolicExpr;
-      std::string varName;
-      unsigned int totalRwExpr = rwFormula.size();
-      for (unsigned int j = 0; j < totalRwExpr; j++) {
-        varName = filter.getName(rwSymbolicExpr[j]->getKid(1));
-        if (RelatedSymbolicExpr.find(varName) == RelatedSymbolicExpr.end()) {
-          Event *temp = rwFormula[j].first;
-          expr currIf = z3_ctx.int_const(curr->eventName.c_str());
-          expr tempIf = z3_ctx.int_const(temp->eventName.c_str());
-          expr constraint = z3_ctx.bool_val(1);
-          if (curr->threadId == temp->threadId) {
-            if (curr->eventId > temp->eventId)
-              constraint = rwFormula[j].second;
-          } else {
-            constraint = implies(tempIf < currIf, rwFormula[j].second);
-          }
-          z3_solver.add(constraint);
-        }
-      }
+#if O3
+      concretizeReadValue(curr);
 #endif
-
       z3_solver.add(!ifFormula[i].second);
       for (unsigned j = 0; j < ifFormula.size(); j++) {
         if (j == i) {
@@ -276,14 +245,13 @@ void Encode::check_if() {
       }
       // statics
       formulaNum = formulaNum + ifFormula.size() - 1;
-      // solving
-      check_result result;
       struct timeval start, finish;
       gettimeofday(&start, NULL);
+      check_result result;
       try {
         result = z3_solver.check();
       } catch (z3::exception &ex) {
-        std::cerr << "\nUnexpected solving error: " << ex.msg() << "\n";
+        kleem_exploration("Flip branch %s, unexpected solving error: %s", prefixName.c_str(), ex.msg());
         continue;
       }
       gettimeofday(&finish, NULL);
@@ -295,11 +263,9 @@ void Encode::check_if() {
         vector<Event *> vecEvent;
         computePrefix(vecEvent, ifFormula[i].first);
         Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, prefixName);
-        // printf prefix to DIR output_info
         runtimeData->addToScheduleSet(prefix);
         runtimeData->satBranch++;
         runtimeData->satCost += cost;
-        sum++;
 #if PRINT_SOLVING_RESULT
         printPrefixInfo(prefix, ifFormula[i].first);
         printSolvingSolution(prefix, ifFormula[i].second);
@@ -309,21 +275,42 @@ void Encode::check_if() {
         runtimeData->unSatCost += cost;
       }
 
-#if PRINT_BRANCH_INFO
-      std::cerr << "spend " << cost << "(s) ";
       if (result == z3::sat) {
-        std::cerr << "Success.\n";
+        kleem_exploration("Flip branch %s, spent %lf(s), Success.", prefixName.c_str(), cost);
       } else if (result == z3::unsat) {
-        std::cerr << "Failed.\n";
-      } else
-        std::cerr << "Warning.\n";
-#endif
-
+        kleem_exploration("Flip branch %s, spent %lf(s), Failed.", prefixName.c_str(), cost);
+      } else {
+        kleem_exploration("Flip branch %s, spent %lf(s), Unknown.", prefixName.c_str(), cost);
+      }
     } else {
       runtimeData->unSatBranchByPreSolve++;
     }
     // backstracking
     z3_solver.pop();
+  }
+}
+
+void Encode::concretizeReadValue(Event *curr) {
+  //添加读写的解
+  std::set<std::string> &RelatedSymbolicExpr = trace->RelatedSymbolicExpr;
+  std::vector<ref<klee::Expr>> &rwSymbolicExpr = trace->rwSymbolicExpr;
+  std::string varName;
+  unsigned int totalRwExpr = rwFormula.size();
+  for (unsigned int j = 0; j < totalRwExpr; j++) {
+    varName = filter.getName(rwSymbolicExpr[j]->getKid(1));
+    if (RelatedSymbolicExpr.find(varName) == RelatedSymbolicExpr.end()) {
+      Event *temp = rwFormula[j].first;
+      expr currIf = z3_ctx.int_const(curr->eventName.c_str());
+      expr tempIf = z3_ctx.int_const(temp->eventName.c_str());
+      expr constraint = z3_ctx.bool_val(1);
+      if (curr->threadId == temp->threadId) {
+        if (curr->eventId > temp->eventId)
+          constraint = rwFormula[j].second;
+      } else {
+        constraint = implies(tempIf < currIf, rwFormula[j].second);
+      }
+      z3_solver.add(constraint);
+    }
   }
 }
 
@@ -356,28 +343,16 @@ void Encode::showInitTrace() {
   printSourceLine("./output_info/source_trace", trace->path);
 }
 
-void Encode::PTS() {
-
+void Encode::symbolicTaintAnalysis() {
   buildPTSFormula();
-
-  std::cerr << "\nPTS\n";
-
-  std::vector<std::string> &PTS = trace->PTS;
-  std::vector<std::string> &taintPTS = trace->taintPTS;
-  std::vector<std::string> &noTaintPTS = trace->noTaintPTS;
-  std::set<std::string> &DTAMSerial = trace->DTAMSerial;
-  std::set<std::string> &DTAMhybrid = trace->DTAMhybrid;
-  for (std::set<std::string>::iterator it = trace->DTAMParallel.begin(), ie = trace->DTAMParallel.end(); it != ie;
-       it++) {
-    if (DTAMSerial.find(*it) == DTAMSerial.end()) {
-      PTS.push_back(*it);
+  for (auto name : trace->DTAMParallel) {
+    if (trace->DTAMSerial.find(name) == trace->DTAMSerial.end()) {
+      trace->PTS.push_back(name);
     }
   }
 
-  for (std::vector<std::string>::iterator it = PTS.begin(); it != PTS.end();) {
-
+  for (std::vector<std::string>::iterator it = trace->PTS.begin(); it != trace->PTS.end();) {
     z3_taint_solver.push();
-
     std::string varName = (*it) + "_tag";
     expr lhs = z3_ctx.bool_const(varName.c_str());
     expr rhs = z3_ctx.bool_val(true);
@@ -390,76 +365,65 @@ void Encode::PTS() {
       expr tempIf = z3_ctx.int_const(temp->eventName.c_str());
       expr constraint = z3_ctx.bool_val(1);
       if (curr->threadId == temp->threadId) {
-        if (curr->eventId > temp->eventId)
+        if (curr->eventId > temp->eventId) {
           constraint = ifFormula[j].second;
-      } else
+        }
+      } else {
         constraint = implies(tempIf < currIf, ifFormula[j].second);
+      }
       z3_taint_solver.add(constraint);
-    }
+    } // for
+
     check_result result;
     try {
       result = z3_taint_solver.check();
     } catch (z3::exception &ex) {
-      std::cerr << "\nUnexpected error: " << ex.msg() << "\n";
+      kleem_dstam("Unexpected error: %s", ex.msg());
       continue;
     }
     if (result == z3::sat) {
-      taintPTS.push_back(*it);
-      if (DTAMhybrid.find(*it) == DTAMhybrid.end()) {
-        std::cerr << "taintPTS : " << *it << "\n";
-        std::cerr << "DTAMhybrid not find"
-                  << "\n";
-        model m = z3_taint_solver.get_model();
+      trace->taintPTS.push_back(*it);
+      if (trace->DTAMhybrid.find(*it) == trace->DTAMhybrid.end()) {
+        kleem_dstam("taintPTS: %s, DTAMhybrid does not find.", (*it).c_str());
       } else {
-        std::cerr << "taintPTS : " << *it << "\n";
-        std::cerr << "DTAMhybrid find"
-                  << "\n";
-        std::cerr << "getLine : " << trace->getLine(*it) << "\n";
+        kleem_dstam("taintPTS: %s, DTAMhybrid finds it, getLine: %s", (*it).c_str(), trace->getLine(*it).c_str());
       }
       model m = z3_taint_solver.get_model();
-      for (std::vector<std::string>::iterator itt = it; itt != PTS.end(); itt++) {
+      for (std::vector<std::string>::iterator itt = it; itt != trace->PTS.end();) {
         stringstream ss;
         ss << m.eval(z3_ctx.bool_const((*itt).c_str()));
         long isTaint = atoi(ss.str().c_str());
         if (isTaint != 0) {
-          taintPTS.push_back(*itt);
-          std::cerr << "taintPTS : " << *itt << "\n";
-          itt--;
-          PTS.erase(itt);
+          trace->taintPTS.push_back(*itt);
+          kleem_dstam("taintPTS: %s.", (*itt).c_str());
+          itt = trace->PTS.erase(itt);
+        } else {
+          itt++;
         }
       }
-
-      PTS.erase(it);
     } else {
-      noTaintPTS.push_back(*it);
-
-      if (DTAMhybrid.find(*it) == DTAMhybrid.end()) {
-        std::cerr << "noTaintPTS : " << *it << "\n";
-        std::cerr << "DTAMhybrid not find"
-                  << "\n";
+      trace->noTaintPTS.push_back(*it);
+      if (trace->DTAMhybrid.find(*it) == trace->DTAMhybrid.end()) {
+        kleem_dstam("noTaintPTS: %s, DTAMhybrid does not find.", (*it).c_str());
       } else {
-        std::cerr << "noTaintPTS : " << *it << "\n";
-        std::cerr << "DTAMhybrid find"
-                  << "\n";
-        std::cerr << "getLine : " << trace->getLine(*it) << "\n";
+        kleem_dstam("noTaintPTS: %s, DTAMhybrid finds it, getLine: %s", (*it).c_str(), trace->getLine(*it).c_str());
       }
-      PTS.erase(it);
     }
+    it = trace->PTS.erase(it);
     z3_taint_solver.pop();
-  }
-  runtimeData->taint.push_back(DTAMSerial.size());
-  runtimeData->taintPTS.push_back(taintPTS.size());
-  runtimeData->noTaintPTS.push_back(noTaintPTS.size());
+  } // for
+  runtimeData->taint.push_back(trace->DTAMSerial.size());
+  runtimeData->taintPTS.push_back(trace->taintPTS.size());
+  runtimeData->noTaintPTS.push_back(trace->noTaintPTS.size());
 
-  // std::cerr << "\n size : " << DTAMSerial.size() + taintPTS.size() << "\n";
-  for (std::set<std::string>::iterator it = DTAMSerial.begin(); it != DTAMSerial.end(); it++) {
-    runtimeData->allTaintMap.insert(trace->getAssemblyLine(*it));
-    trace->taintMap.insert(trace->getAssemblyLine(*it));
+  for (auto name : trace->DTAMSerial) {
+    runtimeData->allTaintMap.insert(trace->getAssemblyLine(name));
+    trace->taintMap.insert(trace->getAssemblyLine(name));
     // std::cerr << "DTAMSerial name : " << *it << " getLine : " << trace->getLine(*it) << "\n";
   }
-  for (std::vector<std::string>::iterator it = taintPTS.begin(); it != taintPTS.end(); it++) {
-    runtimeData->allTaintMap.insert(trace->getAssemblyLine(*it));
-    trace->taintMap.insert(trace->getAssemblyLine(*it));
+  for (auto name : trace->taintPTS) {
+    runtimeData->allTaintMap.insert(trace->getAssemblyLine(name));
+    trace->taintMap.insert(trace->getAssemblyLine(name));
     // std::cerr << "taintPTS name : " << *it << " getLine : " << trace->getLine(*it) << "\n";
   }
 
@@ -550,8 +514,6 @@ void Encode::printPrefixInfo(Prefix *prefix, Event *ifEvent) {
     out_to_file << "\n";
   }
   out_to_file.close();
-  // print source code
-  //	printSourceLine(filename, eventOrderPair);
 }
 
 void Encode::printSolvingSolution(Prefix *prefix, expr ifExpr) {
@@ -887,35 +849,12 @@ void Encode::buildPathCondition(solver z3_solver_pc) {
   }
 }
 
-void Encode::buildifAndassert() {
+void Encode::contraintEncoding() {
   Trace *trace = runtimeData->getCurrentTrace();
-#if FILTER_USELESS_DEBUG
-  std::cerr << "Before Filtering:" << std::endl;
-  std::cerr << "storeSymbolicExpr = " << trace->storeSymbolicExpr.size() << std::endl;
-  for (std::vector<ref<Expr>>::iterator it = trace->storeSymbolicExpr.begin(), ie = trace->storeSymbolicExpr.end();
-       it != ie; ++it) {
-    it->get()->dump();
-  }
-  std::cerr << "brSymbolicExpr = " << trace->brSymbolicExpr.size() << std::endl;
-  for (std::vector<ref<Expr>>::iterator it = trace->brSymbolicExpr.begin(), ie = trace->brSymbolicExpr.end(); it != ie;
-       ++it) {
-    it->get()->dump();
-  }
-  std::cerr << "assertSymbolicExpr = " << trace->assertSymbolicExpr.size() << std::endl;
-  for (std::vector<ref<Expr>>::iterator it = trace->assertSymbolicExpr.begin(), ie = trace->assertSymbolicExpr.end();
-       it != ie; ++it) {
-    it->get()->dump();
-  }
+#if O1
+  filter.filterUnusedExprs(trace);
 #endif
-  filter.filterUseless(trace);
-#if FILTER_USELESS_DEBUG
-  std::cerr << "After Filtering:" << std::endl;
-  std::cerr << "pathCondition = " << trace->pathCondition.size() << std::endl;
-  for (std::vector<ref<Expr>>::iterator it = trace->pathCondition.begin(), ie = trace->pathCondition.end(); it != ie;
-       ++it) {
-    it->get()->dump();
-  }
-#endif
+
   unsigned brGlobal = 0;
   for (auto &itr : trace->readSet) {
     brGlobal += itr.second.size();
@@ -929,50 +868,34 @@ void Encode::buildifAndassert() {
   runtimeData->brGlobal += brGlobal;
 
   KQuery2Z3 *kq = new KQuery2Z3(z3_ctx);
-
   unsigned int totalAssertEvent = trace->assertEvent.size();
   unsigned int totalAssertSymbolic = trace->assertSymbolicExpr.size();
   assert(totalAssertEvent == totalAssertSymbolic && "the number of brEvent is not equal to brSymbolic");
-  Event *event = NULL;
   z3::expr res = z3_ctx.bool_val(true);
   for (unsigned int i = 0; i < totalAssertEvent; i++) {
-    event = trace->assertEvent[i];
-    //		std::cerr << "asert : " << trace->assertSymbolicExpr[i] <<"\n";
+    Event *event = trace->assertEvent[i];
     res = kq->getZ3Expr(trace->assertSymbolicExpr[i]);
-    //		string fileName = event->inst->info->file;
     unsigned line = event->inst->info->line;
     if (line != 0)
       assertFormula.push_back(make_pair(event, res));
-    //		else
-    //			ifFormula.push_back(make_pair(event, res));
   }
 
-  unsigned int totalBrEvent = trace->brEvent.size();
-  for (unsigned int i = 0; i < totalBrEvent; i++) {
-    event = trace->brEvent[i];
-    //		std::cerr << "br : " << trace->brSymbolicExpr[i] <<"\n";
+  for (unsigned int i = 0; i < trace->brEvent.size(); i++) {
+    Event *event = trace->brEvent[i];
     res = kq->getZ3Expr(trace->brSymbolicExpr[i]);
     if (event->isConditionInst == true) {
-      //			event->inst->inst->dump();
-      //			string fileName = event->inst->info->file;
-      //			unsigned line = event->inst->info->line;
-      //			std::cerr << "fileName : " << fileName <<" line : " << line << "\n";
       ifFormula.push_back(make_pair(event, res));
-      //			std::cerr << "event name : " << ifFormula[i].first->eventName << "\n";
-      //			std::cerr << "constraint : " << ifFormula[i].second << "\n";
     } else if (event->isConditionInst == false) {
       z3_solver.add(res);
     }
   }
 
-  unsigned int totalRwExpr = trace->rwSymbolicExpr.size();
-  for (unsigned int i = 0; i < totalRwExpr; i++) {
-    event = trace->rwEvent[i];
+  for (unsigned int i = 0; i < trace->rwSymbolicExpr.size(); i++) {
+    Event *event = trace->rwEvent[i];
     res = kq->getZ3Expr(trace->rwSymbolicExpr[i]);
     rwFormula.push_back(make_pair(event, res));
-    //		std::cerr << "rwSymbolicExpr : " << res << "\n";
   }
-  buildAllFormula();
+  encodeBasicFormulas();
 }
 
 expr Encode::buildExprForConstantValue(Value *V, bool isLeft, string currInstPrefix) {
@@ -1169,7 +1092,7 @@ void Encode::buildMemoryModelFormula(solver z3_solver_mm) {
       // statics
       formulaNum++;
 
-      // eventNameInZ3 will be used at check_if
+      // eventNameInZ3 will be used at flipIfBranches
       eventNameInZ3.insert(map<string, expr>::value_type(pre->eventName, preExpr));
       eventNameInZ3.insert(map<string, expr>::value_type(post->eventName, postExpr));
     }
@@ -1347,31 +1270,10 @@ void Encode::buildReadWriteFormula(solver z3_solver_rw) {
 #endif
   // prepare
   markLatestWriteForGlobalVar();
-  //
   //	std::cerr << "size : " << trace->readSet.size()<<"\n";
   //	std::cerr << "size : " << trace->writeSet.size()<<"\n";
   map<string, vector<Event *>>::iterator read;
   map<string, vector<Event *>>::iterator write;
-
-  // debug
-  // print out all the read and write insts of global vars.
-  if (false) {
-    read = trace->readSetRelatedToBranch.begin();
-    for (; read != trace->readSetRelatedToBranch.end(); read++) {
-      std::cerr << "global var read:" << read->first << "\n";
-      for (unsigned i = 0; i < read->second.size(); i++) {
-        std::cerr << read->second[i]->eventName << "---" << read->second[i]->globalName << "\n";
-      }
-    }
-    write = trace->writeSetRelatedToBranch.begin();
-    for (; write != trace->writeSetRelatedToBranch.end(); write++) {
-      std::cerr << "global var write:" << write->first << "\n";
-      for (unsigned i = 0; i < write->second.size(); i++) {
-        std::cerr << write->second[i]->eventName << "---" << write->second[i]->globalName << "\n";
-      }
-    }
-  }
-  // debug
 
   map<string, vector<Event *>>::iterator ir = trace->readSetRelatedToBranch.begin(); // key--variable,
   Event *currentRead;

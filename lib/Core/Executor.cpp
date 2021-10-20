@@ -5135,7 +5135,7 @@ bool Executor::isFunctionSpecial(Function *f) {
 }
 
 void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **envp) {
-  llvm::errs() << "--Info: Iteritive verification started.\n";
+  kleem_note("Start to exhaust thread schedules and branches under current input.");
   while (!isFinished && execStatus != RUNTIMEERROR) {
     execStatus = SUCCESS;
     listenerService->startControl(this);
@@ -5143,7 +5143,7 @@ void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **
     listenerService->endControl(this);
     prepareNextExecution();
   }
-  llvm::errs() << "--Info: Iteritive verification teiminated.\n";
+  kleem_note("Exhaustive analysis terminated.");
 }
 
 void Executor::prepareNextExecution() {
@@ -5154,7 +5154,6 @@ void Executor::prepareNextExecution() {
 }
 
 void Executor::prepareNewPrefix() {
-  //获取新的前缀
   Prefix *pref = listenerService->getRuntimeDataManager()->getNextPrefix();
   if (pref) {
     delete this->prefix;

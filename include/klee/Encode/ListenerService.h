@@ -28,7 +28,7 @@ class ListenerService {
 private:
   std::vector<BitcodeListener *> bitcodeListeners;
   RuntimeDataManager rdManager;
-  Encode *encode;
+  Encode *encoder;
   DTAM *dtam;
   struct timeval start, finish;
   double cost;

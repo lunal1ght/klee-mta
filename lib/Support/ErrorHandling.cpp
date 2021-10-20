@@ -30,6 +30,10 @@ static const char *warningPrefix = "WARNING";
 static const char *warningOncePrefix = "WARNING ONCE";
 static const char *errorPrefix = "ERROR";
 static const char *notePrefix = "NOTE";
+static const char *debugPrefix = "DEBUG";
+static const char *executionPrefix = "EXECUTION";
+static const char *explorationPrefix = "EXPLORATION";
+static const char *dstamPrefix = "DSTAM";
 
 namespace klee {
 cl::OptionCategory MiscCat("Miscellaneous options", "");
@@ -85,12 +89,31 @@ static void klee_vfmessage(FILE *fp, const char *pfx, const char *msg,
 
     // Notes
     if (shouldSetColor(pfx, msg, notePrefix))
-      fdos.changeColor(llvm::raw_ostream::WHITE,
+      fdos.changeColor(llvm::raw_ostream::GREEN,
+                       /*bold=*/true,
+                       /*bg=*/false);
+    // Debug info
+    if (shouldSetColor(pfx, msg, debugPrefix))
+      fdos.changeColor(llvm::raw_ostream::YELLOW,
+                       /*bold=*/true,
+                       /*bg=*/false);
+    // execution
+    if (shouldSetColor(pfx, msg, executionPrefix))
+      fdos.changeColor(llvm::raw_ostream::CYAN,
+                       /*bold=*/true,
+                       /*bg=*/false);
+    // Exploratioon
+    if (shouldSetColor(pfx, msg, explorationPrefix))
+      fdos.changeColor(llvm::raw_ostream::CYAN,
+                       /*bold=*/true,
+                       /*bg=*/false);    // Exploratioon
+    if (shouldSetColor(pfx, msg, dstamPrefix))
+      fdos.changeColor(llvm::raw_ostream::GREEN,
                        /*bold=*/true,
                        /*bg=*/false);
   }
 
-  fdos << "KLEE: ";
+  fdos << "KLEEM: ";
   if (pfx)
     fdos << pfx << ": ";
 
@@ -131,6 +154,41 @@ void klee::klee_message(const char *msg, ...) {
   va_list ap;
   va_start(ap, msg);
   klee_vmessage(NULL, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_execution(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(executionPrefix, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_note(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(notePrefix, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_debug(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(debugPrefix, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_exploration(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(explorationPrefix, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_dstam(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(dstamPrefix, false, msg, ap);
   va_end(ap);
 }
 

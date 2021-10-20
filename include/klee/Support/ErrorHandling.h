@@ -32,6 +32,12 @@ void klee_error(const char *msg, ...)
 /// newline on stderr and to messages.txt.
 void klee_message(const char *msg, ...) __attribute__((format(printf, 1, 2)));
 
+void kleem_execution(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+void kleem_note(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+void kleem_debug(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+void kleem_exploration(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+void kleem_dstam(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+
 /// Print "KLEE: " followed by the msg in printf format and a
 /// newline to messages.txt.
 void klee_message_to_file(const char *msg, ...)

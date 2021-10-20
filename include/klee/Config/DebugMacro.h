@@ -10,9 +10,14 @@
 #define FILTER_USELESS_DEBUG 0
 
 // Features
-#define DO_DSTAM 0
+#define DO_DSTAM 1
 
 // Encoding
 #define INT_ARITHMETIC 0
+
+// Optimization
+#define O1 1
+#define O2 0
+#define O3 0
 
 #endif // CONFIG_DEBUG_MACRO_H
