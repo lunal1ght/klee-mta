@@ -8,9 +8,11 @@
 #define PRINT_BRANCH_INFO 1
 #define PRINT_SOLVING_RESULT 1
 #define FILTER_USELESS_DEBUG 0
+#define PRINT_ASSERT_INFO 0
 
 // Features
-#define DO_DSTAM 1
+#define DO_DSTAM 0
+#define DO_ASSERT_VERIFICATION 1
 
 // Encoding
 #define INT_ARITHMETIC 0

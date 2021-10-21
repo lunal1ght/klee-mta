@@ -673,7 +673,7 @@ void ListenerService::endControl(Executor *executor) {
 
     gettimeofday(&start, NULL);
     encoder = new Encode(&rdManager);
-    encoder->contraintEncoding();
+    encoder->constraintEncoding();
 #if PRINT_DETAILED_TRACE
     rdManager.printCurrentTrace(false);
 #endif
@@ -682,8 +682,14 @@ void ListenerService::endControl(Executor *executor) {
     cost = (double)(finish.tv_sec * 1000000UL + finish.tv_usec - start.tv_sec * 1000000UL - start.tv_usec) / 1000000UL;
     rdManager.solvingCost += cost;
 
+#if DO_ASSERT_VERIFICATION
+    kleem_verifyassert("Verify the assertions on current trace.");
+    encoder->verifyAssertion();
+    kleem_verifyassert("Assertion verification is over.");
+#endif
+
 #if DO_DSTAM
-    kleem_dstam("Carry on taint analysis.");
+    kleem_dstam("Carry on taint analysis on current trace.");
     taintAnalysis();
     kleem_dstam("Taint analysis is over.");
 #endif

@@ -47,13 +47,13 @@ public:
     runtimeData->allFormulaNum += formulaNum;
     runtimeData->solvingTimes += solvingTimes;
   }
-  void encodeBasicFormulas();
-  void contraintEncoding();
+  void encodeTraceToFormulas();
+  void constraintEncoding();
   void buildPTSFormula();
   void showInitTrace();
   void check_output();
   void flipIfBranches();
-  bool verify();
+  bool verifyAssertion();
 
   void symbolicTaintAnalysis();
 
@@ -102,6 +102,7 @@ private:
   bool taintReadFromInitFormula(Event *read, expr &ret);
 
   void computePrefix(vector<Event *> &vecEvent, Event *ifEvent);
+  void printAssertionInfo();
   void printPrefixInfo(Prefix *prefix, Event *ifEvent);
   void printSolvingSolution(Prefix *prefix, expr ifExpr);
 

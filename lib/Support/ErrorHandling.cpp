@@ -29,11 +29,12 @@ FILE *klee::klee_message_file = NULL;
 static const char *warningPrefix = "WARNING";
 static const char *warningOncePrefix = "WARNING ONCE";
 static const char *errorPrefix = "ERROR";
-static const char *notePrefix = "NOTE";
-static const char *debugPrefix = "DEBUG";
-static const char *executionPrefix = "EXECUTION";
-static const char *explorationPrefix = "EXPLORATION";
-static const char *dstamPrefix = "DSTAM";
+static const char *notePrefix = "__NOTE";
+static const char *debugPrefix = "__DEBUG";
+static const char *executionPrefix = "__EXECUTION";
+static const char *explorationPrefix = "__EXPLORATION";
+static const char *dstamPrefix = "__DSTAM";
+static const char *verifyassertPrefix = "__VERIFYASSERT";
 
 namespace klee {
 cl::OptionCategory MiscCat("Miscellaneous options", "");
@@ -108,6 +109,10 @@ static void klee_vfmessage(FILE *fp, const char *pfx, const char *msg,
                        /*bold=*/true,
                        /*bg=*/false);    // Exploratioon
     if (shouldSetColor(pfx, msg, dstamPrefix))
+      fdos.changeColor(llvm::raw_ostream::GREEN,
+                       /*bold=*/true,
+                       /*bg=*/false);    
+    if (shouldSetColor(pfx, msg, verifyassertPrefix))
       fdos.changeColor(llvm::raw_ostream::GREEN,
                        /*bold=*/true,
                        /*bg=*/false);
@@ -189,6 +194,13 @@ void klee::kleem_dstam(const char *msg, ...) {
   va_list ap;
   va_start(ap, msg);
   klee_vmessage(dstamPrefix, false, msg, ap);
+  va_end(ap);
+}
+
+void klee::kleem_verifyassert(const char *msg, ...) {
+  va_list ap;
+  va_start(ap, msg);
+  klee_vmessage(verifyassertPrefix, false, msg, ap);
   va_end(ap);
 }
 

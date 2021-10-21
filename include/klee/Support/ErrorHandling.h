@@ -37,6 +37,7 @@ void kleem_note(const char *msg, ...) __attribute__((format(printf, 1, 2)));
 void kleem_debug(const char *msg, ...) __attribute__((format(printf, 1, 2)));
 void kleem_exploration(const char *msg, ...) __attribute__((format(printf, 1, 2)));
 void kleem_dstam(const char *msg, ...) __attribute__((format(printf, 1, 2)));
+void kleem_verifyassert(const char *msg, ...) __attribute__((format(printf, 1, 2)));
 
 /// Print "KLEE: " followed by the msg in printf format and a
 /// newline to messages.txt.

@@ -38,12 +38,12 @@
 #include <vector>
 
 #include "klee/ADT/Ref.h"
+#include "klee/Config/DebugMacro.h"
 #include "klee/Encode/Encode.h"
 #include "klee/Encode/Prefix.h"
 #include "klee/Expr/Expr.h"
 #include "klee/Module/InstructionInfoTable.h"
 #include "klee/Module/KInstruction.h"
-#include "klee/Config/DebugMacro.h"
 #include "klee/Support/ErrorHandling.h"
 
 #define BUFFERSIZE 300
@@ -54,7 +54,7 @@ using namespace std;
 using namespace z3;
 namespace klee {
 
-void Encode::encodeBasicFormulas() {
+void Encode::encodeTraceToFormulas() {
 #if PRINT_FORMULA
   kleem_debug("Display kinds of constaint formulas.");
 #endif
@@ -73,12 +73,12 @@ void Encode::encodeBasicFormulas() {
   try {
     result = z3_solver.check();
     if (result == z3::sat) {
-      std::cerr << "encodeBasicFormulas success!" << "\n";
+      kleem_note("ncodeTraceToFormulas success.");
     } else {
-      std::cerr << "encodeBasicFormulas fail!" << "\n";
+      kleem_note("ncodeTraceToFormulas fail.");
     }
   } catch (z3::exception &ex) {
-    std::cerr << "\nUnexpected error: " << ex.msg() << "\n";
+      kleem_note("Unexpected error: %s.", ex.msg());
   }
 #endif
 }
@@ -98,35 +98,27 @@ void Encode::buildPTSFormula() {
 }
 
 // true :: assert can't be violated. false :: assert can be violated.
-bool Encode::verify() {
-  std::cerr << "\nVerify this trace.\n";
+bool Encode::verifyAssertion() {
+  KQuery2Z3 *kq = new KQuery2Z3(z3_ctx);
+  unsigned int totalAssertEvent = trace->assertEvent.size();
+  unsigned int totalAssertSymbolic = trace->assertSymbolicExpr.size();
+  assert(totalAssertEvent == totalAssertSymbolic && "the number of brEvent is not equal to brSymbolic");
+  z3::expr res = z3_ctx.bool_val(true);
+  for (unsigned int i = 0; i < totalAssertEvent; i++) {
+    Event *event = trace->assertEvent[i];
+    res = kq->getZ3Expr(trace->assertSymbolicExpr[i]);
+    unsigned line = event->inst->info->line;
+    if (line != 0)
+      assertFormula.push_back(make_pair(event, res));
+  }
 #if PRINT_ASSERT_INFO
-  stringstream ss;
-  ss << "./output_info/"
-     << "Trace" << trace->Id << ".z3expr";
-  std::ofstream out_file(ss.str().c_str(), std::ios_base::out);
-  out_file << "\n" << z3_solver << "\n";
-  out_file << "\nifFormula\n";
-  for (unsigned i = 0; i < ifFormula.size(); i++) {
-    out_file << "Trace" << trace->Id << "#" << ifFormula[i].first->inst->info->file << "#"
-             << ifFormula[i].first->inst->info->line << "#" << ifFormula[i].first->eventName << "#"
-             << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "\n";
-    out_file << ifFormula[i].second << "\n";
-  }
-  out_file << "\nassertFormula\n";
-  for (unsigned i = 0; i < assertFormula.size(); i++) {
-    out_file << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->file << "#"
-             << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
-             << assertFormula[i].first->brCondition << "-" << !(assertFormula[i].first->brCondition) << "\n";
-    out_file << assertFormula[i].second << "\n";
-  }
-  out_file.close();
+  printAssertionInfo();
 #endif
   z3_solver.push(); // backtrack 1
-  std::cerr << "\nThe number of assert: " << assertFormula.size() << "\n";
+  kleem_verifyassert("The number of assertions: %ld.", assertFormula.size());
   for (unsigned i = 0; i < assertFormula.size(); i++) {
     z3_solver.push(); // backtrack point 2
-    encodeBasicFormulas();
+    encodeTraceToFormulas();
 
     Event *currAssert = assertFormula[i].first;
     z3_solver.add(!assertFormula[i].second);
@@ -163,34 +155,32 @@ bool Encode::verify() {
     formulaNum = formulaNum + ifFormula.size() - 1;
     check_result result = z3_solver.check();
     solvingTimes++;
-    
+
     if (result == z3::sat) {
       vector<Event *> vecEvent;
       computePrefix(vecEvent, assertFormula[i].first);
       Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, "assert_" + assertFormula[i].first->eventName);
-      stringstream output;
-      output << "./output_info/" << prefix->getName() << ".z3expr";
       runtimeData->addToScheduleSet(prefix);
-      std::cerr << "Assert Failure at " << assertFormula[i].first->inst->info->file << ": "
-                << assertFormula[i].first->inst->info->line << "\n";
+      kleem_verifyassert("Assertion Failure at %s:L%d", 
+                         assertFormula[i].first->inst->info->file.c_str(),
+                         assertFormula[i].first->inst->info->line);
 #if PRINT_SOLVING_RESULT
       printPrefixInfo(prefix, assertFormula[i].first);
       printSolvingSolution(prefix, assertFormula[i].second);
 #endif
-      // 如果有一个assert失效，则返回false
+      // Once a assertion is failed, exit the verification.
       return false;
     }
     z3_solver.pop(); // backtrack point 2
 #if PRINT_ASSERT_INFO
     stringstream ss;
-    ss << "Trace" << trace->Id << "#"
-       << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
-       << assertFormula[i].first->brCondition << "-" << !(assertFormula[i].first->brCondition) << "assert_bug";
-    std::cerr << "Verify assert " << i + 1 << " @" << ss.str() << ": " << solvingInfo(result);
+    ss << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->line << "#"
+       << assertFormula[i].first->eventName << "#" << assertFormula[i].first->brCondition << "-"
+       << !(assertFormula[i].first->brCondition) << "assert_bug";
+    kleem_verifyassert("Verify assert %d @%s: %s",i + 1, ss.str().c_str(), solvingInfo(result).c_str());
 #endif
   }
   z3_solver.pop(); // backtrack 1
-  std::cerr << "\n Trace verification is over!\n";
   return true;
 }
 
@@ -210,9 +200,8 @@ void Encode::flipIfBranches() {
   kleem_exploration("Start to filp the branches on trace, totally %lu branches.", ifFormula.size());
   for (unsigned i = 0; i < ifFormula.size(); i++) {
     stringstream ss;
-    ss << "Trace" << trace->Id << "-L" << ifFormula[i].first->inst->info->line << "-" 
-       << ifFormula[i].first->eventName << "-"
-       <<  ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition);
+    ss << "Trace" << trace->Id << "-L" << ifFormula[i].first->inst->info->line << "-" << ifFormula[i].first->eventName
+       << "-" << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition);
     std::string prefixName = ss.str();
     // create a backstracking point
     z3_solver.push();
@@ -317,7 +306,8 @@ void Encode::concretizeReadValue(Event *curr) {
 void Encode::showInitTrace() {
   auto err = std::error_code();
   stringstream output;
-  output << "./output_info/" << "Trace" << trace->Id << ".bitcode";
+  output << "./output_info/"
+         << "Trace" << trace->Id << ".bitcode";
   raw_fd_ostream out_to_file(output.str().c_str(), err, sys::fs::F_Append);
   unsigned size = trace->path.size();
   // bitcode
@@ -479,6 +469,29 @@ void Encode::computePrefix(vector<Event *> &vecEvent, Event *ifEvent) {
   for (unsigned i = 0; i < eventOrderPair.size(); i++) {
     vecEvent.push_back(eventOrderPair[i].second);
   }
+}
+
+void Encode::printAssertionInfo() {
+  stringstream ss;
+  ss << "./output_info/"
+     << "Trace" << trace->Id << ".z3expr";
+  std::ofstream out_file(ss.str().c_str(), std::ios_base::out);
+  out_file << "\n" << z3_solver << "\n";
+  out_file << "\nifFormula\n";
+  for (unsigned i = 0; i < ifFormula.size(); i++) {
+    out_file << "Trace" << trace->Id << "#" << ifFormula[i].first->inst->info->file << "#"
+             << ifFormula[i].first->inst->info->line << "#" << ifFormula[i].first->eventName << "#"
+             << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "\n";
+    out_file << ifFormula[i].second << "\n";
+  }
+  out_file << "\nassertFormula\n";
+  for (unsigned i = 0; i < assertFormula.size(); i++) {
+    out_file << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->file << "#"
+             << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
+             << assertFormula[i].first->brCondition << "-" << !(assertFormula[i].first->brCondition) << "\n";
+    out_file << assertFormula[i].second << "\n";
+  }
+  out_file.close();
 }
 
 void Encode::printPrefixInfo(Prefix *prefix, Event *ifEvent) {
@@ -849,7 +862,7 @@ void Encode::buildPathCondition(solver z3_solver_pc) {
   }
 }
 
-void Encode::contraintEncoding() {
+void Encode::constraintEncoding() {
   Trace *trace = runtimeData->getCurrentTrace();
 #if O1
   filter.filterUnusedExprs(trace);
@@ -868,21 +881,9 @@ void Encode::contraintEncoding() {
   runtimeData->brGlobal += brGlobal;
 
   KQuery2Z3 *kq = new KQuery2Z3(z3_ctx);
-  unsigned int totalAssertEvent = trace->assertEvent.size();
-  unsigned int totalAssertSymbolic = trace->assertSymbolicExpr.size();
-  assert(totalAssertEvent == totalAssertSymbolic && "the number of brEvent is not equal to brSymbolic");
-  z3::expr res = z3_ctx.bool_val(true);
-  for (unsigned int i = 0; i < totalAssertEvent; i++) {
-    Event *event = trace->assertEvent[i];
-    res = kq->getZ3Expr(trace->assertSymbolicExpr[i]);
-    unsigned line = event->inst->info->line;
-    if (line != 0)
-      assertFormula.push_back(make_pair(event, res));
-  }
-
   for (unsigned int i = 0; i < trace->brEvent.size(); i++) {
     Event *event = trace->brEvent[i];
-    res = kq->getZ3Expr(trace->brSymbolicExpr[i]);
+    z3::expr res = kq->getZ3Expr(trace->brSymbolicExpr[i]);
     if (event->isConditionInst == true) {
       ifFormula.push_back(make_pair(event, res));
     } else if (event->isConditionInst == false) {
@@ -892,10 +893,10 @@ void Encode::contraintEncoding() {
 
   for (unsigned int i = 0; i < trace->rwSymbolicExpr.size(); i++) {
     Event *event = trace->rwEvent[i];
-    res = kq->getZ3Expr(trace->rwSymbolicExpr[i]);
+    z3::expr res = kq->getZ3Expr(trace->rwSymbolicExpr[i]);
     rwFormula.push_back(make_pair(event, res));
   }
-  encodeBasicFormulas();
+  encodeTraceToFormulas();
 }
 
 expr Encode::buildExprForConstantValue(Value *V, bool isLeft, string currInstPrefix) {
@@ -1301,7 +1302,7 @@ void Encode::buildReadWriteFormula(solver z3_solver_rw) {
       }
       if (currentRead->latestWriteEventInSameThread != NULL) {
         //					llvm::errs() << "currentRead->latestWriteEventInSameThread : " <<
-        //currentRead->latestWriteEventInSameThread->globalName << "\n";
+        // currentRead->latestWriteEventInSameThread->globalName << "\n";
         mayBeRead.push_back(currentRead->latestWriteEventInSameThread);
       } else {
         // if this read don't have the corresponding write, it may use from Initialization operation.
@@ -1684,7 +1685,7 @@ expr Encode::makeExprsSum(vector<expr> exprs) {
 
 void Encode::buildInitTaintFormula(solver z3_solver_it) {
 #if PRINT_FORMULA
-    std::cerr << "Initial Taint Formula\n";
+  std::cerr << "Initial Taint Formula\n";
 #endif
   std::map<std::string, llvm::Constant *>::iterator gvi = trace->global_variable_initializer.begin();
   for (; gvi != trace->global_variable_initializer.end(); gvi++) {
