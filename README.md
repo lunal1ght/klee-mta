@@ -1,28 +1,19 @@
-KLEE Symbolic Virtual Machine
-=============================
+KLEEM -- A KLEE-based Verification Engine for Multithreaded Programs 
+====================================================================
 
 [![Build Status](https://travis-ci.com/klee/klee.svg?branch=master)](https://travis-ci.com/klee/klee)
-[![Build Status](https://github.com/klee/klee/workflows/CI/badge.svg)](https://github.com/klee/klee/actions?query=workflow%3ACI)
-[![Build Status](https://api.cirrus-ci.com/github/klee/klee.svg)](https://cirrus-ci.com/github/klee/klee)
 [![Coverage](https://codecov.io/gh/klee/klee/branch/master/graph/badge.svg)](https://codecov.io/gh/klee/klee)
 
-`KLEE` is a symbolic virtual machine built on top of the LLVM compiler
-infrastructure. Currently, there are two primary components:
+`KLEEM` is a verification machine for multithreaded programs built on top of the LLVM compiler infrastructure. Currently, there are four primary components:
 
-  1. The core symbolic virtual machine engine; this is responsible for
-     executing LLVM bitcode modules with support for symbolic
-     values. This is comprised of the code in lib/.
+  1. The core symbolic virtual machine engine supporting multithread; this is responsible for executing LLVM bitcode modules with support for symbolic values. This is comprised of the code in lib/.
 
-  2. A POSIX/Linux emulation layer oriented towards supporting uClibc,
-     with additional support for making parts of the operating system
-     environment symbolic.
+  2. A constraint encoder supporting transforming a multithread trace to constraint formulas, which symbolically captures all schedules under a fixed input.
 
-Additionally, there is a simple library for replaying computed inputs
-on native code (for closed programs). There is also a more complicated
-infrastructure for replaying the inputs generated for the POSIX/Linux
-emulation layer, which handles running native programs in an
-environment that matches a computed test input, including setting up
-files, pipes, environment variables, and passing command line
-arguments.
+  3. A branch explorer. Its target is to find out all input-sensitive branches and schedule-sensitive branches.(In progress)
 
-For further information, see the [webpage](http://klee.github.io/).
+  4. An assertion verifyer. It can verify all program properties that can be expressed as assertions.
+
+  5. A symbolic taint analyzer. It definely investigates whether a variable is tainted under the random thread shceduling.
+
+KLEEM is implemented on top of KLEE 2.2. For further information, such as how-to-build and usage manual, see the [webpage](http://klee.github.io/).
