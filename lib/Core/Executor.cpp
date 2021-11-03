@@ -4107,7 +4107,7 @@ void Executor::terminateStateOnError(ExecutionState &state,
   }
     
   terminateState(state);
-  llvm::errs() << "encounter runtime error\n";
+  kleem_note("Encountered a runtime error.");
   execStatus = RUNTIMEERROR;
   listenerService->executionFailed(state, state.currentThread->pc);
   if (shouldExitOn(termReason))

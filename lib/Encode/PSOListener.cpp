@@ -125,12 +125,10 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
             item->isGlobal = true;
           }
           string varName = createVarName(pthreadmo->id, key, item->isGlobal);
-          string varFullName;
           if (item->isGlobal) {
-            unsigned loadTime = getLoadTime(key);
-            varFullName = createGlobalVarFullName(varName, loadTime, false);
+            unsigned loadTime = getLoadTimes(key);
+            item->globalName  = createGlobalVarFullName(varName, loadTime, false);
           }
-          item->globalName = varFullName;
           item->name = varName;
         }
       } else if (f->getName().str() == "pthread_join") {
@@ -351,45 +349,41 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
       } else {
         ref<Expr> address = executor->eval(ki, 0, state).value;
         ObjectPair op;
-#if DEBUG_RUNTIME
+#if DEBUG_RUNTIME_LISTENER
         ref<Expr> addressCurrent = executor->evalCurrent(ki, 0, state).value;
         llvm::errs() << "address : " << address << " address Current : " << addressCurrent << "\n";
         bool successCurrent = executor->getMemoryObject(op, state, state.currentThread->addressSpace, addressCurrent);
         llvm::errs() << "successCurrent : " << successCurrent << "\n";
 #endif
         ConstantExpr *realAddress = dyn_cast<ConstantExpr>(address);
-        if (realAddress) {
-          uint64_t key = realAddress->getZExtValue();
-          bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
-          if (success) {
-            const MemoryObject *mo = op.first;
-            if (executor->isGlobalMO(mo)) {
-              item->isGlobal = true;
-            }
-            string varName = createVarName(mo->id, key, item->isGlobal);
-            string varFullName;
-            if (item->isGlobal) {
-              unsigned loadTime = getLoadTime(key);
-              varFullName = createGlobalVarFullName(varName, loadTime, false);
-            }
-            item->globalName = varFullName;
-            item->name = varName;
-
-#if PTR
-            if (item->isGlobal) {
-#else
-            if (!inst->getType()->isPointerTy() && item->isGlobal) {
-#endif
-              trace->insertReadSet(varName, item);
-            }
-            if (inst->getOperand(0)->getValueID() == Value::InstructionVal + Instruction::GetElementPtr) {
-            }
-          } else {
-            llvm::errs() << "Load address = " << realAddress->getZExtValue() << "\n";
-            assert(0 && "load resolve unsuccess");
-          }
-        } else {
+        if (!realAddress) {
           assert(0 && " address is not const");
+        }
+        uint64_t key = realAddress->getZExtValue();
+        bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
+        if (!success) {
+          llvm::errs() << "Load address = " << realAddress->getZExtValue() << "\n";
+          assert(0 && "load resolve unsuccess");
+        }
+        const MemoryObject *mo = op.first;
+        if (executor->isGlobalMO(mo)) {
+          item->isGlobal = true;
+        }
+        string varName = createVarName(mo->id, key, item->isGlobal);
+        if (item->isGlobal) {
+          unsigned loadTime = getLoadTimes(key);
+          item->globalName = createGlobalVarFullName(varName, loadTime, false);
+        }
+        item->name = varName;
+
+#if SUPPORT_PTR
+        if (item->isGlobal) {
+#else
+        if (!inst->getType()->isPointerTy() && item->isGlobal) {
+#endif
+          trace->insertReadSet(varName, item);
+        }
+        if (inst->getOperand(0)->getValueID() == Value::InstructionVal + Instruction::GetElementPtr) {
         }
       }
       break;
@@ -431,7 +425,7 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
           }
           item->globalName = varFullName;
           item->name = varName;
-#if PTR
+#if SUPPORT_PTR
           if (item->isGlobal) {
 #else
           if (!inst->getOperand(0)->getType()->isPointerTy() && item->isGlobal) {
@@ -811,7 +805,7 @@ void PSOListener::analyzeInputValue(uint64_t &address, ObjectPair &op, Type *typ
 }
 
 //计算全局变量的读操作次数
-unsigned PSOListener::getLoadTime(uint64_t address) {
+unsigned PSOListener::getLoadTimes(uint64_t address) {
   unsigned loadTime;
   map<uint64_t, unsigned>::iterator index = loadRecord.find(address);
   if (index == loadRecord.end()) {

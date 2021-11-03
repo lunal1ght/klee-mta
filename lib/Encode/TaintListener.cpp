@@ -99,7 +99,7 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
         isFloat = 1;
       }
       if (currentEvent->isGlobal) {
-#if PTR
+#if SUPPORT_PTR
         if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
 #else
         if (isFloat || id == Type::IntegerTyID) {
@@ -187,7 +187,7 @@ void TaintListener::beforeExecuteInstruction(ExecutionState &state, KInstruction
               ref<Expr> svalue = executor->evalCurrent(ki, j, state).value;
               if (value->isTaint) {
                 svalue->isTaint = true;
-#if DEBUG_RUNTIME
+#if DEBUG_RUNTIME_LISTENER
                 llvm::errs() << "svalue->isTaint = true;" << "\n";
 #endif
               }
@@ -256,7 +256,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
           for (unsigned i = 0; i < thread->vectorClock.size(); i++) {
             currentEvent->vectorClock.push_back(thread->vectorClock[i]);
           }
-#if PTR
+#if SUPPORT_PTR
           if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
 #else
           if (isFloat || id == Type::IntegerTyID) {
@@ -285,7 +285,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
           manualMakeTaint(value, false);
         }
         executor->getDestCell(state, ki).value = value;
-#if DEBUG_RUNTIME
+#if DEBUG_RUNTIME_LISTENER
         llvm::errs() << value << " taint : " << isTaint << "\n";
 #endif
         break;
@@ -312,7 +312,7 @@ void TaintListener::afterExecuteInstruction(ExecutionState &state, KInstruction 
             }
           }
           if (isTaint) {
-#if DEBUG_RUNTIME
+#if DEBUG_RUNTIME_LISTENER
             llvm::errs() << "executor->getDestCell(state, ki).value->isTaint = true;" << "\n";
 #endif
             executor->getDestCell(state, ki).value->isTaint = true;

@@ -45,6 +45,7 @@
 #include "klee/Module/InstructionInfoTable.h"
 #include "klee/Module/KInstruction.h"
 #include "klee/Support/ErrorHandling.h"
+#include "klee/Support/FileHandling.h"
 
 #define BUFFERSIZE 300
 #define BIT_WIDTH 64
@@ -78,7 +79,7 @@ void Encode::encodeTraceToFormulas() {
       kleem_note("ncodeTraceToFormulas fail.");
     }
   } catch (z3::exception &ex) {
-      kleem_note("Unexpected error: %s.", ex.msg());
+    kleem_note("Unexpected error: %s.", ex.msg());
   }
 #endif
 }
@@ -161,8 +162,7 @@ bool Encode::verifyAssertion() {
       computePrefix(vecEvent, assertFormula[i].first);
       Prefix *prefix = new Prefix(vecEvent, trace->createThreadPoint, "assert_" + assertFormula[i].first->eventName);
       runtimeData->addToScheduleSet(prefix);
-      kleem_verifyassert("Assertion Failure at %s:L%d", 
-                         assertFormula[i].first->inst->info->file.c_str(),
+      kleem_verifyassert("Assertion Failure at %s:L%d", assertFormula[i].first->inst->info->file.c_str(),
                          assertFormula[i].first->inst->info->line);
 #if PRINT_SOLVING_RESULT
       printPrefixInfo(prefix, assertFormula[i].first);
@@ -177,7 +177,7 @@ bool Encode::verifyAssertion() {
     ss << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->line << "#"
        << assertFormula[i].first->eventName << "#" << assertFormula[i].first->brCondition << "-"
        << !(assertFormula[i].first->brCondition) << "assert_bug";
-    kleem_verifyassert("Verify assert %d @%s: %s",i + 1, ss.str().c_str(), solvingInfo(result).c_str());
+    kleem_verifyassert("Verify assert %d @%s: %s", i + 1, ss.str().c_str(), solvingInfo(result).c_str());
 #endif
   }
   z3_solver.pop(); // backtrack 1
@@ -304,33 +304,32 @@ void Encode::concretizeReadValue(Event *curr) {
 }
 
 void Encode::showInitTrace() {
-  auto err = std::error_code();
-  stringstream output;
-  output << "./output_info/"
-         << "Trace" << trace->Id << ".bitcode";
-  raw_fd_ostream out_to_file(output.str().c_str(), err, sys::fs::F_Append);
-  unsigned size = trace->path.size();
+  stringstream filename;
+  filename << "Trace" << trace->Id << ".bitcode";
+  auto os = interpreterHandler->openKleemOutputFile(filename.str());
+  assert(os && "Failed to create file.");
   // bitcode
-  for (unsigned i = 0; i < size; i++) {
+  for (unsigned i = 0; i < trace->path.size(); i++) {
     Event *currEvent = trace->path[i];
     if (trace->path[i]->inst->info->line == 0 || trace->path[i]->eventType != Event::NORMAL)
       continue;
-    out_to_file << i << "---" << trace->path[i]->threadId << "---" << trace->path[i]->eventName << "---"
-                << trace->path[i]->inst->inst->getParent()->getParent()->getName().str() << "---"
-                << trace->path[i]->inst->info->line << "---" << trace->path[i]->brCondition << "---";
-    trace->path[i]->inst->inst->print(out_to_file);
+    *os << i << "---" << trace->path[i]->threadId << "---" << trace->path[i]->eventName << "---"
+        << trace->path[i]->inst->inst->getParent()->getParent()->getName().str() << "---"
+        << trace->path[i]->inst->info->line << "---" << trace->path[i]->brCondition << "---";
+    trace->path[i]->inst->inst->print(*os);
     if (currEvent->isGlobal) {
-      out_to_file << "--" << currEvent->globalName << "=";
+      *os << "--" << currEvent->globalName << "=";
       string str = currEvent->globalName;
       if (str == "") {
-        out_to_file << "\n";
+        *os << "\n";
         continue;
       }
     }
-    out_to_file << "\n";
+    *os << "\n";
   }
+  os->flush();
   // source code
-  printSourceLine("./output_info/source_trace", trace->path);
+  printSourceLine("source_trace.txt", trace->path);
 }
 
 void Encode::symbolicTaintAnalysis() {
@@ -472,48 +471,50 @@ void Encode::computePrefix(vector<Event *> &vecEvent, Event *ifEvent) {
 }
 
 void Encode::printAssertionInfo() {
-  stringstream ss;
-  ss << "./output_info/"
-     << "Trace" << trace->Id << ".z3expr";
-  std::ofstream out_file(ss.str().c_str(), std::ios_base::out);
-  out_file << "\n" << z3_solver << "\n";
-  out_file << "\nifFormula\n";
+  stringstream fileName;
+  fileName << "Trace" << trace->Id << ".z3expr";
+  auto out_file = interpreterHandler->openKleemOutputFile(fileName.str());
+  assert(out_file && "Failed to create file.");
+  *out_file << "\n" << z3_solver << "\n";
+  *out_file << "\nifFormula\n";
   for (unsigned i = 0; i < ifFormula.size(); i++) {
-    out_file << "Trace" << trace->Id << "#" << ifFormula[i].first->inst->info->file << "#"
-             << ifFormula[i].first->inst->info->line << "#" << ifFormula[i].first->eventName << "#"
-             << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "\n";
-    out_file << ifFormula[i].second << "\n";
+    *out_file << "Trace" << trace->Id << "#" << ifFormula[i].first->inst->info->file << "#"
+              << ifFormula[i].first->inst->info->line << "#" << ifFormula[i].first->eventName << "#"
+              << ifFormula[i].first->brCondition << "-" << !(ifFormula[i].first->brCondition) << "\n";
+    stringstream ss;
+    ss << ifFormula[i].second;
+    *out_file << ss.str() << "\n";
   }
-  out_file << "\nassertFormula\n";
+  *out_file << "\nassertFormula\n";
   for (unsigned i = 0; i < assertFormula.size(); i++) {
-    out_file << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->file << "#"
-             << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
-             << assertFormula[i].first->brCondition << "-" << !(assertFormula[i].first->brCondition) << "\n";
-    out_file << assertFormula[i].second << "\n";
+    *out_file << "Trace" << trace->Id << "#" << assertFormula[i].first->inst->info->file << "#"
+              << assertFormula[i].first->inst->info->line << "#" << assertFormula[i].first->eventName << "#"
+              << assertFormula[i].first->brCondition << "-" << !(assertFormula[i].first->brCondition) << "\n";
+    stringstream ss;
+    ss << assertFormula[i].second;
+    *out_file << ss.str() << "\n";
   }
-  out_file.close();
+  out_file->flush();
 }
 
 void Encode::printPrefixInfo(Prefix *prefix, Event *ifEvent) {
   vector<Event *> *orderedEventList = prefix->getEventList();
   unsigned size = orderedEventList->size();
   model m = z3_solver.get_model();
-  // print counterexample at bitcode
-  std::error_code err = std::error_code();
-  stringstream output;
-  output << "./output_info/" << prefix->getName() << ".bitcode";
-  raw_fd_ostream out_to_file(output.str().c_str(), err, sys::fs::F_Append);
+  // print counterexample at bitcode level
+  auto os = interpreterHandler->openKleemOutputFile(prefix->getName() + ".bitcode");
+  assert(os && "Failed to create file.");
   for (unsigned i = 0; i < size; i++) {
     Event *currEvent = orderedEventList->at(i);
-    out_to_file << currEvent->threadId << "---" << currEvent->eventName << "---"
-                << currEvent->inst->inst->getParent()->getParent()->getName().str() << "---"
-                << currEvent->inst->info->line << "---" << currEvent->brCondition << "---";
-    currEvent->inst->inst->print(out_to_file);
+    *os << currEvent->threadId << "---" << currEvent->eventName << "---"
+        << currEvent->inst->inst->getParent()->getParent()->getName().str() << "---" << currEvent->inst->info->line
+        << "---" << currEvent->brCondition << "---";
+    currEvent->inst->inst->print(*os);
     if (currEvent->isGlobal) {
-      out_to_file << "--" << currEvent->globalName << "=";
+      *os << "--" << currEvent->globalName << "=";
       string str = currEvent->globalName;
       if (str == "") {
-        out_to_file << "\n";
+        *os << "\n";
         continue;
       }
       stringstream ss;
@@ -522,36 +523,37 @@ void Encode::printPrefixInfo(Prefix *prefix, Event *ifEvent) {
 #else
       ss << m.eval(z3_ctx.bv_const(str.c_str(), BIT_WIDTH)); // just for
 #endif
-      out_to_file << ss.str();
+      *os << ss.str();
     }
-    out_to_file << "\n";
+    *os << "\n";
   }
-  out_to_file.close();
+  os->flush();
 }
 
 void Encode::printSolvingSolution(Prefix *prefix, expr ifExpr) {
-  stringstream output;
-  output << "./output_info/" << prefix->getName() << ".z3expr";
-  std::ofstream out_file(output.str().c_str(), std::ios_base::out | std::ios_base::app);
-  out_file << "!ifFormula[i].second : " << !ifExpr << "\n";
-  out_file << "\n" << z3_solver << "\n";
+  stringstream fileName;
+  fileName << prefix->getName() << ".z3expr";
+  auto out_file = interpreterHandler->openKleemOutputFile(fileName.str());
+  assert(out_file && "Failed to create file.");
+  stringstream ss;
+  ss << !ifExpr;
+  *out_file << "!ifFormula[i].second : " << ss.str() << "\n";
+  *out_file << "\n" << z3_solver << "\n";
   model m = z3_solver.get_model();
-  out_file << "\nz3_solver.get_model()\n";
-  out_file << "\n" << m << "\n";
-  out_file.close();
+  *out_file << "\nz3_solver.get_model()\n";
+  *out_file << "\n" << m << "\n";
+  out_file->flush();
 }
 
 /// called by showInitTrace to print initial trace
-void Encode::printSourceLine(string path, vector<Event *> &trace) {
-  string output;
-  auto err = std::error_code();
-  output = path + ".txt";
-  raw_fd_ostream out_to_file(output.c_str(), err, sys::fs::F_Append);
-  out_to_file << "threadId  "
-              << "lineNum   "
-              << "function                 "
-              << "source"
-              << "\n";
+void Encode::printSourceLine(string fileName, vector<Event *> &trace) {
+  auto out_to_file = interpreterHandler->openKleemOutputFile(fileName);
+  assert(out_to_file && "Failed to create file.");
+  *out_to_file << "threadId  "
+               << "lineNum   "
+               << "function                 "
+               << "source"
+               << "\n";
   unsigned preThreadId = 0, preCodeLine = 0;
   for (unsigned i = 0, size = trace.size(); i < size; i++) {
     if (trace[i]->eventType != Event::NORMAL)
@@ -585,62 +587,12 @@ void Encode::printSourceLine(string path, vector<Event *> &trace) {
     for (int k = 0; k < 45 - len; k++)
       ss << " ";
     ss << source << "\n";
-    out_to_file << ss.str();
+    *out_to_file << ss.str();
 
     preThreadId = currThreadId;
     preCodeLine = currCodeLine;
   }
-}
-
-/*
- * called by showEventSequence to print counterexample
- */
-void Encode::printSourceLine(string path, vector<pair<int, Event *>> &eventIndexPair) {
-  string output;
-  auto err = std::error_code();
-  output = "./output_info/" + path + ".source";
-  raw_fd_ostream out_to_file(output.c_str(), err, sys::fs::F_Append);
-  out_to_file << "threadId  "
-              << "lineNum   "
-              << "function                 "
-              << "source"
-              << "\n";
-
-  unsigned preThreadId = 0, preCodeLine = 0;
-  for (unsigned i = 0, size = eventIndexPair.size(); i < size; i++) {
-
-    if (eventIndexPair[i].second->eventType != Event::NORMAL)
-      continue;
-    if (eventIndexPair[i].second->inst->info->line == 0)
-      continue;
-    unsigned currCodeLine = eventIndexPair[i].second->inst->info->line;
-    unsigned currThreadId = eventIndexPair[i].second->threadId;
-    if (currThreadId == preThreadId && currCodeLine == preCodeLine)
-      continue;
-    string fileName = eventIndexPair[i].second->inst->info->file;
-    string source = readLine(fileName, eventIndexPair[i].second->inst->info->line);
-    if (source == "{" || source == "}")
-      continue;
-    // write to file
-    int len;
-    stringstream ss;
-    ss << currThreadId;
-    len = strlen(ss.str().c_str());
-    for (int k = 0; k < 10 - len; k++)
-      ss << " ";
-    ss << currCodeLine;
-    len = strlen(ss.str().c_str());
-    for (int k = 0; k < 20 - len; k++)
-      ss << " ";
-    ss << eventIndexPair[i].second->inst->inst->getParent()->getParent()->getName().str();
-    len = strlen(ss.str().c_str());
-    for (int k = 0; k < 45 - len; k++)
-      ss << " ";
-    ss << source << "\n";
-    out_to_file << ss.str();
-    preThreadId = currThreadId;
-    preCodeLine = currCodeLine;
-  }
+  out_to_file->flush();
 }
 
 bool Encode::isAssert(string filename, unsigned line) {
@@ -699,7 +651,7 @@ string Encode::stringTrim(char *source) {
   ret = dest;
   return ret;
 }
-void Encode::logStatisticInfo() {
+void Encode::logThreadStatisticsInfo() {
   unsigned threadNumber = 0;
   unsigned instNumber = 0;
   for (unsigned tid = 0; tid < trace->eventList.size(); tid++) {
@@ -720,16 +672,16 @@ void Encode::logStatisticInfo() {
   unsigned sharedVarNumber = trace->global_variable_final.size();
   unsigned readNumber = trace->readSet.size();
   unsigned writeNumber = trace->writeSet.size();
-  auto err = std::error_code();
-  raw_fd_ostream out("./output_info/statistic.info", err, sys::fs::F_Append);
-  out << "#Threads:" << threadNumber << "\n";
-  out << "#Instructions: " << instNumber << "\n";
-  out << "#Locks: " << lockNumber << "\n";
-  out << "#Lock/Unlock Pairs: " << lockPairNumber << "\n";
-  out << "#Signal/Wait: " << signalNumber << "/" << waitNumber << "\n";
-  out << "#Shared Variables: " << sharedVarNumber << "\n";
-  out << "#Read/Write of shared points: " << readNumber << "/" << writeNumber << "\n";
-  //	out << "#Constaints: " << constaintNumber << "\n";
+  auto out = interpreterHandler->openKleemOutputFile("thread_statistics.txt");
+  assert(out && "Failed to create file.");
+  *out << "#Threads:" << threadNumber << "\n";
+  *out << "#Instructions: " << instNumber << "\n";
+  *out << "#Locks: " << lockNumber << "\n";
+  *out << "#Lock/Unlock Pairs: " << lockPairNumber << "\n";
+  *out << "#Signal/Wait: " << signalNumber << "/" << waitNumber << "\n";
+  *out << "#Shared Variables: " << sharedVarNumber << "\n";
+  *out << "#Read/Write of shared points: " << readNumber << "/" << writeNumber << "\n";
+  out->flush();
 }
 
 void Encode::buildInitValueFormula(solver z3_solver_init) {

@@ -305,6 +305,7 @@ private:
   std::unique_ptr<llvm::raw_ostream> m_infoFile;
 
   SmallString<128> m_outputDirectory;
+  SmallString<128> kleem_outputDirectory;
 
   unsigned m_numTotalTests;     // Number of tests received from the interpreter
   unsigned m_numGeneratedTests; // Number of tests successfully generated
@@ -331,7 +332,9 @@ public:
                        const char *errorSuffix);
 
   std::string getOutputFilename(const std::string &filename);
+  std::string getKleemOutputFilename(const std::string &filename);
   std::unique_ptr<llvm::raw_fd_ostream> openOutputFile(const std::string &filename);
+  std::unique_ptr<llvm::raw_fd_ostream> openKleemOutputFile(const std::string &filename);
   std::string getTestFilename(const std::string &suffix, unsigned id);
   std::unique_ptr<llvm::raw_fd_ostream> openTestFile(const std::string &suffix, unsigned id);
 
@@ -365,7 +368,23 @@ KleeHandler::KleeHandler(int argc, char **argv)
       klee_error("cannot create \"%s\": %s", directory.c_str(), strerror(errno));
 
     m_outputDirectory = directory;
+    kleem_outputDirectory = directory;
   } else {
+    // "kleem-out-<i>"
+    for (int i = 0; i <= INT_MAX; ++i) {
+      SmallString<128> d(directory);
+      llvm::sys::path::append(d, "kleem-out-");
+      raw_svector_ostream ds(d);
+      ds << i;
+      // create directory
+      if (mkdir(d.c_str(), 0775) == 0) {
+        kleem_outputDirectory = d;
+        break;
+      }
+      // otherwise try again or exit on error
+      if (errno != EEXIST)
+        klee_error("cannot create \"%s\": %s", kleem_outputDirectory.c_str(), strerror(errno));
+    }
     // "klee-out-<i>"
     int i = 0;
     for (; i <= INT_MAX; ++i) {
@@ -444,6 +463,12 @@ std::string KleeHandler::getOutputFilename(const std::string &filename) {
   return path.c_str();
 }
 
+std::string KleeHandler::getKleemOutputFilename(const std::string &filename) {
+  SmallString<128> path = kleem_outputDirectory;
+  sys::path::append(path, filename);
+  return path.c_str();
+}
+
 std::unique_ptr<llvm::raw_fd_ostream>
 KleeHandler::openOutputFile(const std::string &filename) {
   std::string Error;
@@ -451,6 +476,21 @@ KleeHandler::openOutputFile(const std::string &filename) {
   auto f = klee_open_output_file(path, Error);
   if (!f) {
     klee_warning("error opening file \"%s\".  KLEE may have run out of file "
+                 "descriptors: try to increase the maximum number of open file "
+                 "descriptors by using ulimit (%s).",
+                 path.c_str(), Error.c_str());
+    return nullptr;
+  }
+  return f;
+}
+
+std::unique_ptr<llvm::raw_fd_ostream> 
+KleeHandler::openKleemOutputFile(const std::string &filename) {
+  std::string Error;
+  std::string path = getKleemOutputFilename(filename);
+  auto f = klee_open_output_file(path, Error);
+  if (!f) {
+    klee_warning("error opening file \"%s\".  KLEEM may have run out of file "
                  "descriptors: try to increase the maximum number of open file "
                  "descriptors by using ulimit (%s).",
                  path.c_str(), Error.c_str());

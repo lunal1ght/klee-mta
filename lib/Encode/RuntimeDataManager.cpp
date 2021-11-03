@@ -46,16 +46,15 @@ RuntimeDataManager::RuntimeDataManager() : currentTrace(NULL) {
   DTAMhybridCost = 0;
   PTSCost = 0;
 
-  system("rm -rf ./output_info");
-  system("mkdir ./output_info");
 }
 
 RuntimeDataManager::~RuntimeDataManager() {
   for (auto trace : traceList) {
     delete trace;
   }
-  auto err = std::error_code();
-  raw_fd_ostream out_to_file("./output_info/statics.txt", err, sys::fs::F_Append);
+  }
+
+std::string RuntimeDataManager::getResultString() {
   stringstream ss;
   ss << "AllFormulaNum:" << allFormulaNum << "\n";
   ss << "SovingTimes:" << solvingTimes << "\n";
@@ -150,11 +149,7 @@ RuntimeDataManager::~RuntimeDataManager() {
     ss << "Send_Data_Hybrid:" << Send_Data_Hybrid[i] << "\n";
     ss << "Send_Data_PTS:" << Send_Data_PTS[i] << "\n";
   }
-
-  ss << "\n";
-
-  out_to_file << ss.str();
-  out_to_file.close();
+  return ss.str();
 }
 
 Trace *RuntimeDataManager::createNewTrace(unsigned traceId) {
@@ -170,23 +165,6 @@ Trace *RuntimeDataManager::getCurrentTrace() {
 
 void RuntimeDataManager::addToScheduleSet(Prefix *prefix) {
   scheduleSet.push_back(prefix);
-}
-
-// file--true: output to file; file--false: output to terminal
-void RuntimeDataManager::printCurrentTrace(bool toFile) {
-  kleem_debug("Display trace details.");
-  if (toFile) {
-    stringstream ss;
-    ss << "./output_info/trace_" << currentTrace->Id << ".data";
-    auto err = std::error_code();
-    raw_fd_ostream out(ss.str().c_str(), err, sys::fs::F_Append);
-    currentTrace->printExecutionTrace(out);
-    currentTrace->printDetailedInfo(out);
-  } else {
-    currentTrace->printExecutionTrace(llvm::errs());
-    currentTrace->printDetailedInfo(llvm::errs());
-  }
-  kleem_debug("Trace infomation is over.");
 }
 
 Prefix *RuntimeDataManager::getNextPrefix() {

@@ -92,6 +92,7 @@ public:
   bool isCurrentTraceUntested();
   void printAllPrefix(std::ostream &out);
   void printAllTrace(std::ostream &out);
+  std::string getResultString();
 };
 
 } // namespace klee

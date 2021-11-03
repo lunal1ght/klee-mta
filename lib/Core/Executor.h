@@ -553,6 +553,11 @@ public:
     return *interpreterHandler;
   }
 
+  InterpreterHandler* getHandlerPtr() {
+    return interpreterHandler;
+  }
+
+
   void setPathWriter(TreeStreamWriter *tsw) override { pathWriter = tsw; }
 
   void setSymbolicPathWriter(TreeStreamWriter *tsw) override {
