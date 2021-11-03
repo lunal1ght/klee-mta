@@ -272,7 +272,7 @@ void SymbolicListener::afterExecuteInstruction(ExecutionState &state, KInstructi
       if (currentEvent->isGlobal) {
 
         //指针！！！
-#if PTR
+#if SUPPORT_PTR
         if (isFloat || id == Type::IntegerTyID || id == Type::PointerTyID) {
 #else
         if (isFloat || id == Type::IntegerTyID) {

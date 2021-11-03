@@ -14,9 +14,8 @@
 #include "../../lib/Core/ExecutionState.h"
 #include "klee/Encode/RuntimeDataManager.h"
 #include "klee/Thread/StackType.h"
+#include "klee/Config/DebugMacro.h"
 
-#define PTR 0
-#define DEBUG_RUNTIME 0
 #define BIT_WIDTH 64
 
 namespace klee {

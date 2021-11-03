@@ -71,7 +71,7 @@ private:
   llvm::Constant *handleFunctionReturnValue(ExecutionState &state, KInstruction *ki);
   void handleExternalFunction(ExecutionState &state, KInstruction *ki);
   void analyzeInputValue(uint64_t &address, ObjectPair &op, llvm::Type *type);
-  unsigned getLoadTime(uint64_t address);
+  unsigned getLoadTimes(uint64_t address);
   unsigned getLoadTimeForTaint(uint64_t address);
   unsigned getStoreTime(uint64_t address);
   unsigned getStoreTimeForTaint(uint64_t address);
@@ -118,7 +118,7 @@ private:
     }
     ss << signal;
     ss << time;
-#if DEBUG_RUNTIME
+#if DEBUG_RUNTIME_LISTENER
     llvm::errs() << "createGlobalVarFullName : " << ss.str() << "\n";
 #endif
     return ss.str();

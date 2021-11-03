@@ -19,6 +19,8 @@
 #include "klee/Encode/KQuery2Z3.h"
 #include "klee/Encode/RuntimeDataManager.h"
 #include "klee/Encode/Trace.h"
+#include "klee/Core/Interpreter.h"
+
 enum InstType { NormalOp, GlobalVarOp, ThreadOp };
 using namespace llvm;
 using namespace z3;
@@ -28,6 +30,7 @@ namespace klee {
 class Encode {
 private:
   RuntimeDataManager *runtimeData;
+  InterpreterHandler *interpreterHandler;
   // all data about encoding
   Trace *trace;
   context z3_ctx;
@@ -38,7 +41,8 @@ private:
   unsigned solvingTimes;
 
 public:
-  Encode(RuntimeDataManager *data) : runtimeData(data), z3_solver(z3_ctx), z3_taint_solver(z3_ctx) {
+  Encode(RuntimeDataManager *data, InterpreterHandler *ih) : runtimeData(data), z3_solver(z3_ctx), z3_taint_solver(z3_ctx) {
+    interpreterHandler = ih;
     trace = data->getCurrentTrace();
     formulaNum = 0;
     solvingTimes = 0;
@@ -106,13 +110,12 @@ private:
   void printPrefixInfo(Prefix *prefix, Event *ifEvent);
   void printSolvingSolution(Prefix *prefix, expr ifExpr);
 
-  void printSourceLine(string path, vector<pair<int, Event *>> &eventIndexPair);
-  void printSourceLine(string path, vector<Event *> &trace);
+  void printSourceLine(string fileName, vector<Event *> &trace);
   string readLine(string filename, unsigned line);
   bool isAssert(string filename, unsigned line);
   string stringTrim(char *source);
   InstType getInstOpType(Event *event);
-  void logStatisticInfo();
+  void logThreadStatisticsInfo();
 
   void controlGranularity(int level);
   std::string solvingInfo(check_result result);

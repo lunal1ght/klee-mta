@@ -6,9 +6,13 @@
 #define PRINT_FORMULA 0
 #define CHECK_BUILD 0
 #define PRINT_BRANCH_INFO 1
-#define PRINT_SOLVING_RESULT 1
+#define PRINT_SOLVING_RESULT 0
 #define FILTER_USELESS_DEBUG 0
 #define PRINT_ASSERT_INFO 0
+
+// Runtime information
+#define DEBUG_RUNTIME_LISTENER 0
+#define SUPPORT_PTR 1
 
 // Features
 #define DO_DSTAM 0

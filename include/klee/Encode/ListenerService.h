@@ -27,7 +27,8 @@ class ListenerService {
 
 private:
   std::vector<BitcodeListener *> bitcodeListeners;
-  RuntimeDataManager rdManager;
+  RuntimeDataManager *rdManager;
+  InterpreterHandler *interpreterHandler;
   Encode *encoder;
   DTAM *dtam;
   struct timeval start, finish;
@@ -43,7 +44,7 @@ public:
   void popListener();
 
   RuntimeDataManager *getRuntimeDataManager();
-
+  void printCurrentTrace(bool);
   void Preparation();
   void beforeRunMethodAsMain(Executor *executor, ExecutionState &state, llvm::Function *f, MemoryObject *argvMO,
                              std::vector<ref<Expr>> arguments, int argc, char **argv, char **envp);
