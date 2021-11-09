@@ -152,6 +152,10 @@ std::string RuntimeDataManager::getResultString() {
   return ss.str();
 }
 
+unsigned RuntimeDataManager::getTestedPathsNumber() {
+  return testedTraceList.size();
+}
+
 Trace *RuntimeDataManager::createNewTrace(unsigned traceId) {
   currentTrace = new Trace();
   currentTrace->Id = traceId;

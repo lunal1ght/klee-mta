@@ -11,8 +11,8 @@
 #define PRINT_ASSERT_INFO 0
 
 // Runtime information
-#define DEBUG_RUNTIME_LISTENER 0
-#define SUPPORT_PTR 1
+#define DEBUG_RUNTIME_LISTENER 1
+#define SUPPORT_PTR 0
 
 // Features
 #define DO_DSTAM 0

@@ -48,7 +48,9 @@ ThreadScheduler::ThreadScheduler() {}
 
 ThreadScheduler::~ThreadScheduler() {}
 
-RRThreadScheduler::RRThreadScheduler() { count = 0; }
+RRThreadScheduler::RRThreadScheduler() {
+  count = 0;
+}
 
 // 拷贝构造，没用
 RRThreadScheduler::RRThreadScheduler(RRThreadScheduler &scheduler, map<unsigned, Thread *> &threadMap) {
@@ -60,7 +62,9 @@ RRThreadScheduler::RRThreadScheduler(RRThreadScheduler &scheduler, map<unsigned,
 RRThreadScheduler::~RRThreadScheduler() {}
 
 // 考虑使用迭代器而不是front();
-Thread *RRThreadScheduler::selectCurrentItem() { return queue.front(); }
+Thread *RRThreadScheduler::selectCurrentItem() {
+  return queue.front();
+}
 
 Thread *RRThreadScheduler::selectNextItem() {
   if (count > MAXINST) {
@@ -78,11 +82,17 @@ void RRThreadScheduler::popAllItem(vector<Thread *> &allItem) {
   queue.clear();
 }
 
-int RRThreadScheduler::itemNum() { return queue.size(); }
+int RRThreadScheduler::itemNum() {
+  return queue.size();
+}
 
-bool RRThreadScheduler::isSchedulerEmpty() { return queue.empty(); }
+bool RRThreadScheduler::isSchedulerEmpty() {
+  return queue.empty();
+}
 
-void RRThreadScheduler::addItem(Thread *item) { queue.push_back(item); }
+void RRThreadScheduler::addItem(Thread *item) {
+  queue.push_back(item);
+}
 
 void RRThreadScheduler::removeItem(Thread *item) {
   for (list<Thread *>::iterator ti = queue.begin(), te = queue.end(); ti != te; ti++) {
@@ -113,7 +123,9 @@ void RRThreadScheduler::reSchedule() {
   count = 0;
 }
 
-void RRThreadScheduler::setCountZero() { count = 0; }
+void RRThreadScheduler::setCountZero() {
+  count = 0;
+}
 
 FIFSThreadScheduler::FIFSThreadScheduler() {}
 
@@ -125,9 +137,13 @@ FIFSThreadScheduler::FIFSThreadScheduler(FIFSThreadScheduler &scheduler, map<uns
 
 FIFSThreadScheduler::~FIFSThreadScheduler() {}
 
-Thread *FIFSThreadScheduler::selectCurrentItem() { return selectNextItem(); }
+Thread *FIFSThreadScheduler::selectCurrentItem() {
+  return selectNextItem();
+}
 
-Thread *FIFSThreadScheduler::selectNextItem() { return queue.front(); }
+Thread *FIFSThreadScheduler::selectNextItem() {
+  return queue.front();
+}
 
 void FIFSThreadScheduler::popAllItem(vector<Thread *> &allItem) {
   allItem.reserve(queue.size());
@@ -137,11 +153,17 @@ void FIFSThreadScheduler::popAllItem(vector<Thread *> &allItem) {
   queue.clear();
 }
 
-int FIFSThreadScheduler::itemNum() { return queue.size(); }
+int FIFSThreadScheduler::itemNum() {
+  return queue.size();
+}
 
-bool FIFSThreadScheduler::isSchedulerEmpty() { return queue.empty(); }
+bool FIFSThreadScheduler::isSchedulerEmpty() {
+  return queue.empty();
+}
 
-void FIFSThreadScheduler::addItem(Thread *item) { queue.push_back(item); }
+void FIFSThreadScheduler::addItem(Thread *item) {
+  queue.push_back(item);
+}
 
 void FIFSThreadScheduler::removeItem(Thread *item) {
   for (list<Thread *>::iterator ti = queue.begin(), te = queue.end(); ti != te; ti++) {
@@ -182,9 +204,13 @@ PreemptiveThreadScheduler::PreemptiveThreadScheduler(PreemptiveThreadScheduler &
 
 PreemptiveThreadScheduler::~PreemptiveThreadScheduler() {}
 
-Thread *PreemptiveThreadScheduler::selectCurrentItem() { return selectNextItem(); }
+Thread *PreemptiveThreadScheduler::selectCurrentItem() {
+  return selectNextItem();
+}
 
-Thread *PreemptiveThreadScheduler::selectNextItem() { return queue.back(); }
+Thread *PreemptiveThreadScheduler::selectNextItem() {
+  return queue.back();
+}
 
 void PreemptiveThreadScheduler::popAllItem(std::vector<Thread *> &allItem) {
   allItem.reserve(queue.size());
@@ -194,11 +220,17 @@ void PreemptiveThreadScheduler::popAllItem(std::vector<Thread *> &allItem) {
   queue.clear();
 }
 
-int PreemptiveThreadScheduler::itemNum() { return queue.size(); }
+int PreemptiveThreadScheduler::itemNum() {
+  return queue.size();
+}
 
-bool PreemptiveThreadScheduler::isSchedulerEmpty() { return queue.empty(); }
+bool PreemptiveThreadScheduler::isSchedulerEmpty() {
+  return queue.empty();
+}
 
-void PreemptiveThreadScheduler::addItem(Thread *item) { queue.push_back(item); }
+void PreemptiveThreadScheduler::addItem(Thread *item) {
+  queue.push_back(item);
+}
 
 void PreemptiveThreadScheduler::removeItem(Thread *item) {
   for (list<Thread *>::iterator ti = queue.begin(), te = queue.end(); ti != te; ti++) {
@@ -235,9 +267,13 @@ GuidedThreadScheduler::GuidedThreadScheduler(ExecutionState *state, ThreadSchedu
   subScheduler = getThreadSchedulerByType(schedulerType);
 }
 
-GuidedThreadScheduler::~GuidedThreadScheduler() { delete subScheduler; }
+GuidedThreadScheduler::~GuidedThreadScheduler() {
+  delete subScheduler;
+}
 
-Thread *GuidedThreadScheduler::selectCurrentItem() { return selectNextItem(); }
+Thread *GuidedThreadScheduler::selectCurrentItem() {
+  return selectNextItem();
+}
 
 Thread *GuidedThreadScheduler::selectNextItem() {
   Thread *thread = NULL;
@@ -250,18 +286,32 @@ Thread *GuidedThreadScheduler::selectNextItem() {
   return thread;
 }
 
-void GuidedThreadScheduler::popAllItem(vector<Thread *> &allItem) { subScheduler->popAllItem(allItem); }
+void GuidedThreadScheduler::popAllItem(vector<Thread *> &allItem) {
+  subScheduler->popAllItem(allItem);
+}
 
-int GuidedThreadScheduler::itemNum() { return subScheduler->itemNum(); }
+int GuidedThreadScheduler::itemNum() {
+  return subScheduler->itemNum();
+}
 
-bool GuidedThreadScheduler::isSchedulerEmpty() { return subScheduler->isSchedulerEmpty(); }
+bool GuidedThreadScheduler::isSchedulerEmpty() {
+  return subScheduler->isSchedulerEmpty();
+}
 
-void GuidedThreadScheduler::addItem(Thread *item) { subScheduler->addItem(item); }
+void GuidedThreadScheduler::addItem(Thread *item) {
+  subScheduler->addItem(item);
+}
 
-void GuidedThreadScheduler::removeItem(Thread *item) { subScheduler->removeItem(item); }
+void GuidedThreadScheduler::removeItem(Thread *item) {
+  subScheduler->removeItem(item);
+}
 
-void GuidedThreadScheduler::printAllItem(std::ostream &os) { subScheduler->printAllItem(os); }
+void GuidedThreadScheduler::printAllItem(std::ostream &os) {
+  subScheduler->printAllItem(os);
+}
 
-void GuidedThreadScheduler::reSchedule() { subScheduler->reSchedule(); }
+void GuidedThreadScheduler::reSchedule() {
+  subScheduler->reSchedule();
+}
 
 } /* namespace klee */

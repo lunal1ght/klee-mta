@@ -51,6 +51,7 @@ ListenerService::~ListenerService() {
   assert(os && "Can't create file to log result.");
   *os << rdManager->getResultString();
   os->flush();
+  interpreterHandler->setNumPathsDistrinct(rdManager->getTestedPathsNumber());
   for (auto listener : bitcodeListeners) {
     delete listener;
   }
@@ -170,8 +171,10 @@ void ListenerService::beforeRunMethodAsMain(Executor *executor, ExecutionState &
 
 void ListenerService::beforeExecuteInstruction(Executor *executor, ExecutionState &state, KInstruction *ki) {
 #if DEBUG_RUNTIME_LISTENER
-  llvm::errs() << "thread id : " << state.currentThread->threadId << "  ";
-  ki->inst->dump();
+  std::string instStr;
+  raw_string_ostream str(instStr);
+  ki->inst->print(str);
+  kleem_debug("Thread %d, %s", state.currentThread->threadId, instStr.c_str());
 #endif
   for (auto bit : bitcodeListeners) {
     state.currentStack = bit->stack[state.currentThread->threadId];
@@ -642,9 +645,10 @@ void ListenerService::taintAnalysis() {
 void ListenerService::endControl(Executor *executor) {
   if (executor->execStatus != Executor::SUCCESS) {
     kleem_execution("Failed to execute, abandon this execution.");
-    executor->isFinished = true;
+    // executor->isFinished = true;
     return;
-  } else if (!rdManager->isCurrentTraceUntested()) {
+  }
+  if (!rdManager->isCurrentTraceUntested()) {
     rdManager->getCurrentTrace()->traceType = Trace::REDUNDANT;
     kleem_execution("Found a old path.");
   } else {

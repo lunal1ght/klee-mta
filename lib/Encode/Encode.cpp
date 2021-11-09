@@ -61,7 +61,7 @@ void Encode::encodeTraceToFormulas() {
 #endif
   // Prepare
   // level: 0 bitcode; 1 source code; 2 block
-  controlGranularity(2);
+  controlGranularity(1);
 
   buildInitValueFormula(z3_solver);
   buildPathCondition(z3_solver);
@@ -265,7 +265,7 @@ void Encode::flipIfBranches() {
       }
 
       if (result == z3::sat) {
-        kleem_exploration("Flip branch %s, spent %lf(s), Success.", prefixName.c_str(), cost);
+        kleem_exploration("Flip branch %s, spent %lf(s), Successful.", prefixName.c_str(), cost);
       } else if (result == z3::unsat) {
         kleem_exploration("Flip branch %s, spent %lf(s), Failed.", prefixName.c_str(), cost);
       } else {

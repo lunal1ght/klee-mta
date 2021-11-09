@@ -32,9 +32,6 @@ namespace klee {
 Trace::Trace() : Id(0), nextEventId(0), eventList(20), isUntested(true) {}
 
 Trace::~Trace() {
-  for (auto event : path) {
-    delete event;
-  }
   for (auto li : all_lock_unlock) {
     for (auto ei : li.second) {
       delete ei;
@@ -44,6 +41,9 @@ Trace::~Trace() {
     for (auto ei : wi.second) {
       delete ei;
     }
+  }
+  for (auto event : path) {
+    delete event;
   }
 }
 

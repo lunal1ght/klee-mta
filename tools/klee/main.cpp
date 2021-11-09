@@ -310,6 +310,7 @@ private:
   unsigned m_numTotalTests;     // Number of tests received from the interpreter
   unsigned m_numGeneratedTests; // Number of tests successfully generated
   unsigned m_pathsExplored; // number of paths explored so far
+  unsigned m_pathsDistrinct;
 
   // used for writing .ktest files
   int m_argc;
@@ -323,6 +324,8 @@ public:
   /// Returns the number of test cases successfully generated so far
   unsigned getNumTestCases() { return m_numGeneratedTests; }
   unsigned getNumPathsExplored() { return m_pathsExplored; }
+  unsigned getNumPathsDistrinct() { return m_pathsDistrinct; }
+  void setNumPathsDistrinct(unsigned num) { m_pathsDistrinct = num; }
   void incPathsExplored() { m_pathsExplored++; }
 
   void setInterpreter(Interpreter *i);
@@ -1623,6 +1626,8 @@ int main(int argc, char **argv, char **envp) {
         << instructions << "\n";
   stats << "KLEE: done: completed paths = "
         << handler->getNumPathsExplored() << "\n";
+  stats << "KLEEM: done: distinct paths = "
+        << handler->getNumPathsDistrinct() << "\n";
   stats << "KLEE: done: generated tests = "
         << handler->getNumTestCases() << "\n";
 
