@@ -28,6 +28,7 @@
 #include "klee/Thread/StackType.h"
 #include "klee/Thread/Thread.h"
 #include "klee/Thread/ThreadScheduler.h"
+#include "klee/Support/ErrorHandling.h"
 
 #include <cassert>
 #include <iomanip>
@@ -381,27 +382,24 @@ Thread* ExecutionState::getNextThread() {
 
 bool ExecutionState::examineAllThreadFinalState() {
   bool isAllThreadFinished = true;
-  for (ThreadList::iterator ti = threadList.begin(), te = threadList.end();
-       ti != te; ti++) {
+  for (ThreadList::iterator ti = threadList.begin(), te = threadList.end(); ti != te; ti++) {
     Thread *thread = *ti;
     unsigned line;
     std::string file, dir;
-    if (!thread->isTerminated()) {
-      isAllThreadFinished = false;
-      Instruction *inst = thread->prevPC->inst;
-      std::cerr << "thread " << thread->threadId
-                << " unable to finish successfully, final state is "
-                << thread->threadState << std::endl;
-      std::cerr << "function = "
-                << inst->getParent()->getParent()->getName().str() << std::endl;
-      if (const auto &DL = inst->getDebugLoc()) {
-        line = DL->getLine();
-        file = DL->getFilename().str();
-        dir = DL->getDirectory().str();
-        std::cerr << "pos = " << dir << "/" << file << " : " << line << " "
-                  << inst->getOpcodeName() << std::endl;
-      }
-      std::cerr << std::endl;
+    if (thread->isTerminated()) {
+      continue;
+    }
+    isAllThreadFinished = false;
+    Instruction *inst = thread->prevPC->inst;
+    kleem_note("Thread %d is unable to finish normally, thread blocked state is %d.", 
+               thread->threadId, thread->threadState);
+    if (const auto &DL = inst->getDebugLoc()) {
+      line = DL->getLine();
+      file = DL->getFilename().str();
+      dir = DL->getDirectory().str();
+      kleem_note("Blocked in function %s, at %s/%s : %d.", 
+                inst->getParent()->getParent()->getName().str().c_str(), 
+                dir.c_str(), file.c_str(), line);
     }
   }
   threadScheduler->printAllItem(std::cerr);

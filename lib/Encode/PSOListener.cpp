@@ -24,6 +24,7 @@
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+#include "klee/Support/ErrorHandling.h"
 
 #include <fstream>
 #include <iostream>
@@ -363,7 +364,7 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
         bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
         if (!success) {
           llvm::errs() << "Load address = " << realAddress->getZExtValue() << "\n";
-          assert(0 && "load resolve unsuccess");
+          // assert(0 && "load resolve unsuccess");
         }
         const MemoryObject *mo = op.first;
         if (executor->isGlobalMO(mo)) {
@@ -876,5 +877,22 @@ Function *PSOListener::getPointeredFunction(ExecutionState &state, KInstruction 
   uint64_t addr = addrExpr->getZExtValue();
   return (Function *)addr;
 }
+
+  std::string PSOListener::createGlobalVarFullName(std::string varName, unsigned time, bool isStore) {
+    char signal;
+    ss.str("");
+    ss << varName;
+    if (isStore) {
+      signal = 'S';
+    } else {
+      signal = 'L';
+    }
+    ss << signal;
+    ss << time;
+#if DEBUG_RUNTIME_LISTENER
+    kleem_debug("Create global variable full name: %s",  ss.str().c_str());
+#endif
+    return ss.str();
+  }
 
 } // namespace klee

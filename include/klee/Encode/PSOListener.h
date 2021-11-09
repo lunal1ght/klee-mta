@@ -76,6 +76,7 @@ private:
   unsigned getStoreTime(uint64_t address);
   unsigned getStoreTimeForTaint(uint64_t address);
   llvm::Function *getPointeredFunction(ExecutionState &state, KInstruction *ki);
+  std::string createGlobalVarFullName(std::string varName, unsigned time, bool isStore);
 
   std::string createVarName(unsigned memoryId, ref<Expr> address, bool isGlobal) {
     char signal;
@@ -104,23 +105,6 @@ private:
     ss << '_';
     ss << address;
     //				llvm::errs() << "create var name : " << ss.str() << "\n";
-    return ss.str();
-  }
-
-  std::string createGlobalVarFullName(std::string varName, unsigned time, bool isStore) {
-    char signal;
-    ss.str("");
-    ss << varName;
-    if (isStore) {
-      signal = 'S';
-    } else {
-      signal = 'L';
-    }
-    ss << signal;
-    ss << time;
-#if DEBUG_RUNTIME_LISTENER
-    llvm::errs() << "createGlobalVarFullName : " << ss.str() << "\n";
-#endif
     return ss.str();
   }
 

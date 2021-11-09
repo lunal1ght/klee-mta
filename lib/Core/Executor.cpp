@@ -3809,12 +3809,11 @@ void Executor::run(ExecutionState &initialState) {
                            << thread->pc->info->file << "/"
                            << thread->pc->info->line << " "
                            << thread->pc->inst->getOpcodeName() << "\n";
-              // thread->pc->inst->dump();
+              thread->pc->inst->print(llvm::errs());
               llvm::errs() << "thread state is MUTEX_BLOCKED, try to get lock "
                               "but failed\n";
               isAbleToRun = false;
               break;
-              // assert(0 && "thread state is MUTEX_BLOCKED, try to get lock but failed");
             }
             state.reSchedule();
             thread = state.getNextThread();
@@ -3823,7 +3822,6 @@ void Executor::run(ExecutionState &initialState) {
                 llvm::errs() << "perhaps deadlock happen\n";
                 isAbleToRun = false;
                 break;
-                // assert(0 && "perhaps deadlock happen");
               } else {
                 deadlock = true;
               }
@@ -3843,30 +3841,28 @@ void Executor::run(ExecutionState &initialState) {
     default: {
       isAbleToRun = false;
     }
-    }
+    } // switch
 
     //处理前缀出错以及执行出错
     if (!isAbleToRun) {
-      // isExecutionSuccess = false;
       execStatus = RUNTIMEERROR;
       listenerService->executionFailed(state, state.currentThread->pc);
-      llvm::errs() << "thread unable to run, Id: " << thread->threadId
-                   << " state: " << thread->threadState << "\n";
+      kleem_note("Thread %d is unable to run, thread blocked state: %d.", thread->threadId, thread->threadState);
       terminateState(state);
+      updateStates(&state);
       break;
     }
     KInstruction *ki = thread->pc;
     if (prefix && !prefix->isFinished() && ki != prefix->getCurrentInst()) {
-      llvm::errs() << "thread id : " << thread->threadId << "\n";
-      llvm::errs() << "real : ";
-      ki->inst->print(errs());
-      llvm::errs() << "\n";
-      llvm::errs() << "prefix : ";
-      prefix->getCurrentInst()->inst->print(errs());
-      llvm::errs() << "\n";
-      llvm::errs() << "prefix unmatched\n";
+      std::string runInst, shouldInst;
+      raw_string_ostream runInstStream(runInst), shouldInstStream(shouldInst);
+      prefix->getCurrentInst()->inst->print(shouldInstStream);
+      ki->inst->print(runInstStream);
+      kleem_note("Failed to match the prefix: on Thread %d, \nshould be %s, \nbut executed %s.", 
+                 thread->threadId, shouldInst.c_str(), runInst.c_str());
       execStatus = IGNOREDERROR;
       terminateState(state);
+      updateStates(&state);
       break;
     }
     stepInstruction(state);
@@ -3973,14 +3969,12 @@ void Executor::terminateState(ExecutionState &state) {
 
   std::vector<ExecutionState *>::iterator it =
       std::find(addedStates.begin(), addedStates.end(), &state);
-  if (it==addedStates.end()) {
+  if (it == addedStates.end()) {
     state.currentThread->pc = state.currentThread->prevPC;
-
     removedStates.push_back(&state);
   } else {
     // never reached searcher, just delete immediately
-    std::map< ExecutionState*, std::vector<SeedInfo> >::iterator it3 = 
-      seedMap.find(&state);
+    std::map< ExecutionState*, std::vector<SeedInfo> >::iterator it3 = seedMap.find(&state);
     if (it3 != seedMap.end())
       seedMap.erase(it3);
     addedStates.erase(it);
@@ -5136,7 +5130,8 @@ bool Executor::isFunctionSpecial(Function *f) {
 
 void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **envp) {
   kleem_note("Start to exhaust thread schedules and branches under current input.");
-  while (!isFinished && execStatus != RUNTIMEERROR) {
+  // while (!isFinished && execStatus != RUNTIMEERROR) {
+  while (!isFinished) {
     execStatus = SUCCESS;
     listenerService->startControl(this);
     runFunctionAsMain(f, argc, argv, envp);
@@ -5148,15 +5143,17 @@ void Executor::runVerification(llvm::Function *f, int argc, char **argv, char **
 
 void Executor::prepareNextExecution() {
   for (std::set<ExecutionState *>::const_iterator it = states.begin(), ie = states.end(); it != ie; ++it) {
+    llvm::errs() << "=====================\n";
+    exit(-9);
     delete *it;
   }
   prepareNewPrefix();
 }
 
 void Executor::prepareNewPrefix() {
+  delete this->prefix;
   Prefix *pref = listenerService->getRuntimeDataManager()->getNextPrefix();
   if (pref) {
-    delete this->prefix;
     this->prefix = pref;
     isFinished = false;
   } else {
