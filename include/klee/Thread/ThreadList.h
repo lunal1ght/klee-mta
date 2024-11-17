@@ -15,46 +15,60 @@
 #include <vector>
 
 namespace klee {
-class ThreadListIterator;
 
 class ThreadList {
-  friend class ThreadListIterator;
 
 private:
-  std::vector<Thread *> allThreads;
-  std::vector<unsigned> index;
-  int threadNum;
+    std::vector<Thread*> allThreads;
+    std::vector<unsigned> index;
+    int threadNum;
+
 
 public:
-  typedef ThreadListIterator iterator;
-  ThreadList();
-  virtual ~ThreadList();
-  iterator begin();
-  iterator end();
-  iterator begin() const;
-  iterator end() const;
-  void addThread(Thread *thread);
-  std::map<unsigned, Thread *> getAllUnfinishedThreads();
-  Thread *findThreadById(unsigned threadId);
-  int getThreadNum();
-  Thread *getLastThread();
+    class iterator {  // iterator теперь вложенный класс
+
+    private:
+
+        friend class ThreadList;  //  ThreadList  имеет  доступ к  private  членам iterator
+
+
+        ThreadList* threadList;
+        unsigned currentPos;
+
+
+    public:
+        iterator(ThreadList* threadList, unsigned pos = 0);
+        iterator& operator++();  // Префиксный инкремент
+        iterator operator++(int); // Постфиксный инкремент
+        Thread*& operator*(); // Возвращаем  указатель  на  Thread*
+
+        bool operator==(const iterator& another) const;
+        bool operator!=(const iterator& another) const;
+
+
+    };
+
+
+    ThreadList();
+    ~ThreadList(); //  Не виртуальный
+    iterator begin();
+    iterator end();
+    iterator begin() const;
+    iterator end() const;
+    void addThread(Thread* thread);
+    std::map<unsigned, Thread*> getAllUnfinishedThreads();
+    Thread* findThreadById(unsigned threadId);
+    int getThreadNum();
+    Thread* getLastThread();
+
+    // Добавляем методы доступа к данным для iterator
+    const std::vector<Thread*>& getAllThreads() const { return allThreads; }
+    const std::vector<unsigned>& getIndex() const { return index; }
 };
 
-class ThreadListIterator {
 
-public:
-  const ThreadList *threadList;
-  unsigned currentPos;
 
-public:
-  ThreadListIterator(ThreadList *threadList, unsigned pos = 0);
-  ThreadListIterator(const ThreadList *threadList, unsigned pos = 0);
-  ThreadListIterator &operator++(int);
-  Thread *operator*();
-  bool operator==(ThreadListIterator &another);
-  bool operator!=(ThreadListIterator &another);
-};
 
-} /* namespace klee */
+} // namespace klee
 
-#endif /* THREADLIST_H_ */
+#endif // THREADLIST_H_

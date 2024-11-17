@@ -86,11 +86,12 @@ ExecutionState::~ExecutionState() {
     cur_mergehandler->removeOpenState(this);
   }
 
-  for (ThreadList::iterator ti = threadList.begin(), te = threadList.end();
-       ti != te; ti++) {
-    delete *ti;
+  for (Thread* thread : threadList) { 
+    delete thread; //  Удаляем потоки
   }
-  delete threadScheduler;
+
+  delete threadScheduler; 
+
 }
 
 ExecutionState::ExecutionState(const ExecutionState& state):
@@ -110,26 +111,39 @@ ExecutionState::ExecutionState(const ExecutionState& state):
                              : nullptr),
     coveredNew(state.coveredNew),
     forkDisabled(state.forkDisabled) {
+    
+  
   for (const auto &cur_mergehandler: openMergeStack)
     cur_mergehandler->addOpenState(this);
 
-  for (ThreadList::iterator ti = state.threadList.begin(),
-                            te = state.threadList.end();
-       ti != te; ti++) {
-    Thread *thread = new Thread(**ti, &addressSpace);
-    threadList.addThread(thread);
+  currentStack = new StackType(*state.currentStack);
+
+  std::map<Thread*, Thread*> threadMap;
+  
+  for (Thread* thread : state.threadList) { 
+    Thread* newThread = new Thread(*thread, &addressSpace); //  !!!
+    threadList.addThread(newThread);      
+    threadMap[thread] = newThread;       
   }
-  currentThread = findThreadById(state.currentThread->threadId);
-  std::map<unsigned, Thread *> unfinishedThread =
-      threadList.getAllUnfinishedThreads();
-  threadScheduler = new FIFSThreadScheduler(
-      *(FIFSThreadScheduler *)(state.threadScheduler), unfinishedThread);
+  
+  //  Используем map для получения копии currentThread
+  currentThread = threadMap[state.currentThread];  // <<< ИСПРАВЛЕНО
+
+  threadScheduler = state.threadScheduler->clone();
+  
+  // Копируем очередь потоков из старого планировщика, заменяя старые потоки на новые
+  std::list<Thread*> newQueue;
+  for (Thread* thread : state.threadScheduler->getQueue()) {
+    newQueue.push_back(threadMap[thread]); // Копируем указатель на новый поток
+  }
+    threadScheduler->setQueue(newQueue);
 }
 
 ExecutionState *ExecutionState::branch() {
   depth++;
 
   auto *falseState = new ExecutionState(*this);
+  falseState->currentStack = new StackType(*currentStack);
   falseState->setID();
   falseState->coveredNew = false;
   falseState->coveredLines.clear();

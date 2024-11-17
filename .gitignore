@@ -4,6 +4,13 @@ Debug/
 Debug+Asserts/
 Output/
 
+klee-uclibc
+klee-last
+klee-out-*
+kleem-out-*
+asan.log.*
+valgrind_*
+
 # commonly used as cmake build directory
 /build
 

@@ -28,14 +28,11 @@
 
 namespace klee {
 
-StackType::StackType(AddressSpace *addressSpace) : addressSpace(addressSpace) {}
-
-StackType::StackType(AddressSpace *addressSpace, StackType *stack) : addressSpace(addressSpace) {
-  for (std::vector<StackFrame>::iterator ie = stack->realStack.begin(), ee = stack->realStack.end(); ie != ee; ie++) {
-    realStack.push_back(*ie);
-  }
+StackType::StackType(AddressSpace* addressSpace, StackType* stack) : addressSpace(addressSpace) {
+    for (const StackFrame& sf : stack->realStack) {
+        realStack.emplace_back(sf);  //  Используем конструктор копирования StackFrame
+    }
 }
-
 StackType::~StackType() {}
 
 void StackType::pushFrame(KInstIterator caller, KFunction *kf) { realStack.push_back(StackFrame(caller, kf)); }
@@ -76,5 +73,7 @@ void StackType::dumpStack(llvm::raw_ostream &out, KInstIterator prevPC) const {
     target = sf.caller;
   }
 }
+
+StackType::StackType(AddressSpace* addressSpace) : addressSpace(addressSpace) {}
 
 } /* namespace klee */

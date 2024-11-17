@@ -41,6 +41,7 @@ public:
 public:
   Thread(unsigned threadId, Thread *parentThread, KFunction *kf, AddressSpace *addressSpace);
   Thread(Thread &anotherThread, AddressSpace *addressSpace);
+  Thread(const Thread& other);
   virtual ~Thread();
 
   bool isRunnable() {

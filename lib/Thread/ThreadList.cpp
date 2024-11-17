@@ -9,97 +9,94 @@
 
 #include "klee/Thread/ThreadList.h"
 
+#include <cassert>
 #include <iostream>
 
 using namespace ::std;
 namespace klee {
 
 ThreadList::ThreadList() : threadNum(0) {
-  allThreads.resize(20, 0);
+  allThreads.resize(20, nullptr);
   index.reserve(20);
-  // thread id从1开始，根据thread id分配数组元素
-  // allThreads.push_back(0);
 }
 
-ThreadList::~ThreadList() {}
+ThreadList::~ThreadList() = default;
 
-ThreadList::iterator ThreadList::begin() {
-  ThreadListIterator l(this);
-  return l;
-}
+ThreadList::iterator ThreadList::begin() { return iterator(this); }
 
-ThreadList::iterator ThreadList::end() {
-  return ThreadListIterator(this, threadNum);
-}
+ThreadList::iterator ThreadList::end() { return iterator(this, threadNum); }
 
-ThreadList::iterator ThreadList::begin() const {
-  ThreadListIterator l(this);
-  return l;
-}
+ThreadList::iterator ThreadList::begin() const { return iterator(const_cast<ThreadList*>(this)); }
 
-ThreadList::iterator ThreadList::end() const {
-  return ThreadListIterator(this, threadNum);
-}
+ThreadList::iterator ThreadList::end() const { return iterator(const_cast<ThreadList*>(this), threadNum); }
 
-void ThreadList::addThread(Thread *thread) {
-  if (allThreads.size() <= thread->threadId) {
-    allThreads.resize(thread->threadId * 2, 0);
-  }
-  assert(!allThreads[thread->threadId]);
-  allThreads[thread->threadId] = thread;
-  index.push_back(thread->threadId);
-  threadNum++;
-}
-
-map<unsigned, Thread *> ThreadList::getAllUnfinishedThreads() {
-  map<unsigned, Thread *> result;
-  for (ThreadList::iterator ti = begin(), te = end(); ti != te; ti++) {
-    Thread *thread = *ti;
-    if (*ti && !thread->isTerminated()) {
-      result.insert(make_pair(thread->threadId, thread));
+void ThreadList::addThread(Thread* thread) {
+    if (allThreads.size() <= thread->threadId) {
+        allThreads.resize(thread->threadId * 2, nullptr);
     }
-  }
-  return result;
+    assert(!allThreads[thread->threadId] && "Thread with this ID already exists");
+    allThreads[thread->threadId] = thread;
+    index.push_back(thread->threadId);
+    threadNum++;
 }
 
-Thread *ThreadList::findThreadById(unsigned threadId) {
-  assert(threadId < allThreads.size() && allThreads[threadId]);
-  return allThreads[threadId];
+
+std::map<unsigned, Thread*> ThreadList::getAllUnfinishedThreads() {
+    std::map<unsigned, Thread*> result;
+    for (iterator it = begin(); it != end(); it++) { //  Постфиксный инкремент
+        Thread* thread = *it;
+        if (thread && !thread->isTerminated()) {
+            result.emplace(thread->threadId, thread);
+        }
+    }
+    return result;
 }
 
-int ThreadList::getThreadNum() {
-  return threadNum;
+Thread* ThreadList::findThreadById(unsigned threadId) {
+    if (threadId < allThreads.size() && allThreads[threadId]) {
+        return allThreads[threadId];
+    } else {
+        return nullptr; 
+    }
 }
 
-Thread *ThreadList::getLastThread() {
-  return allThreads[index.back()];
+int ThreadList::getThreadNum() { return threadNum; }
+
+Thread* ThreadList::getLastThread() {
+    if (!index.empty()) {
+        return allThreads[index.back()];
+    } else {
+        return nullptr;  //  Или  бросьте  исключение
+    }
 }
 
-ThreadListIterator::ThreadListIterator(ThreadList *threadList, unsigned pos)
-    : threadList(threadList), currentPos(pos) {}
+// --- ThreadList::iterator ---
 
-ThreadListIterator::ThreadListIterator(const ThreadList *threadList, unsigned pos)
-    : threadList(threadList), currentPos(pos) {}
+ThreadList::iterator::iterator(ThreadList* threadList, unsigned pos) : threadList(threadList), currentPos(pos) {}
 
-ThreadListIterator &ThreadListIterator::operator++(int) {
-  currentPos++;
-  return *this;
+ThreadList::iterator& ThreadList::iterator::operator++() {
+    ++currentPos;
+    return *this;
+}//итератор префа
+
+ThreadList::iterator ThreadList::iterator::operator++(int) {
+    iterator temp(*this);  // Создаем копию текущего состояния итератора
+    ++currentPos;          // Инкрементируем текущий итератор
+    return temp;          // Возвращаем копию до инкремента
 }
 
-Thread *ThreadListIterator::operator*() {
-  return threadList->allThreads[threadList->index[currentPos]];
+Thread*& ThreadList::iterator::operator*() {
+    return threadList->allThreads[threadList->index[currentPos]];
 }
 
-bool ThreadListIterator::operator==(ThreadListIterator &another) {
-  if (threadList == another.threadList && currentPos == another.currentPos) {
-    return true;
-  } else {
-    return false;
-  }
+bool ThreadList::iterator::operator==(const iterator& another) const {
+  return threadList == another.threadList && currentPos == another.currentPos;
+
 }
 
-bool ThreadListIterator::operator!=(ThreadListIterator &another) {
-  return !(*this == another);
+bool ThreadList::iterator::operator!=(const iterator& another) const {
+    return !(*this == another);
+
 }
 
-} /* namespace klee */
+} // namespace klee

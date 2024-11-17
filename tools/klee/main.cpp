@@ -48,6 +48,7 @@
 #include <llvm/Bitcode/ReaderWriter.h>
 #endif
 
+#include <iostream>
 #include <dirent.h>
 #include <signal.h>
 #include <unistd.h>
@@ -1558,10 +1559,17 @@ int main(int argc, char **argv, char **envp) {
     }
     interpreter->runVerification(mainFn, pArgc, pArgv, pEnvp);
 
+    if (seeds.empty()) {
+    klee_warning("Стек seeds уже пуст!");
+    }
+
     while (!seeds.empty()) {
+      std::cout << "Очищаю элемент из seeds, размер до удаления: " << seeds.size() << std::endl;
       kTest_free(seeds.back());
       seeds.pop_back();
+      std::cout << "Размер после удаления: " << seeds.size() << std::endl;
     }
+
   }
 
   auto endTime = std::time(nullptr);

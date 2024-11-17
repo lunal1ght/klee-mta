@@ -32,6 +32,19 @@ Thread::Thread(Thread &anotherThread, AddressSpace *addressSpace)
   }
 }
 
+Thread::Thread(const Thread& other) 
+    : pc(other.pc),
+      prevPC(other.prevPC),
+      incomingBBIndex(other.incomingBBIndex),
+      threadId(other.threadId),
+      parentThread(other.parentThread), //  Проверьте, нужно ли копировать или просто присвоить указатель
+      threadState(other.threadState),
+      addressSpace(other.addressSpace), // Проверьте, нужно ли копировать или просто присвоить указатель
+      vectorClock(other.vectorClock) // Копируем vectorClock
+{
+    stack = new StackType(*other.stack); // Глубокое копирование StackType
+}
+
 Thread::~Thread() {
   delete stack;
 }

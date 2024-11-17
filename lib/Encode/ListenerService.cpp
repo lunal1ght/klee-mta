@@ -55,8 +55,8 @@ ListenerService::~ListenerService() {
   for (auto listener : bitcodeListeners) {
     delete listener;
   }
-  delete rdManager;
   delete encoder;
+  delete rdManager;
   delete dtam;
 }
 

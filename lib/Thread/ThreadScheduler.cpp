@@ -15,6 +15,7 @@
 #include "klee/Module/KInstruction.h"
 #include "klee/Thread/ThreadScheduler.h"
 #include <llvm/IR/Instruction.h>
+#include <queue>
 
 #define MAXINST 100
 
@@ -22,44 +23,55 @@ using namespace ::std;
 
 namespace klee {
 
-ThreadScheduler *getThreadSchedulerByType(ThreadScheduler::ThreadSchedulerType type) {
-  ThreadScheduler *scheduler = NULL;
-  switch (type) {
+ThreadScheduler* getThreadSchedulerByType(ThreadScheduler::ThreadSchedulerType type) {
+    //  Вместо  new  используйте  clone()
+    switch (type) {
     case ThreadScheduler::RR: {
-      scheduler = new RRThreadScheduler();
-      break;
+        static RRThreadScheduler prototype;  // Статический экземпляр-прототип
+        return prototype.clone();
     }
     case ThreadScheduler::FIFS: {
-      scheduler = new FIFSThreadScheduler();
-      break;
+        static FIFSThreadScheduler prototype;
+        return prototype.clone();
     }
     case ThreadScheduler::Preemptive: {
-      scheduler = new PreemptiveThreadScheduler();
-      break;
+        static PreemptiveThreadScheduler prototype;
+        return prototype.clone();
     }
     default: {
-      assert("ThreadSchedulerType error");
+        assert("ThreadSchedulerType error");
+        return nullptr;  // Или бросьте исключение
     }
-  }
-  return scheduler;
+  }   
 }
+//ThreadScheduler::ThreadScheduler() {}
 
-ThreadScheduler::ThreadScheduler() {}
-
-ThreadScheduler::~ThreadScheduler() {}
+//ThreadScheduler::~ThreadScheduler() {}
 
 RRThreadScheduler::RRThreadScheduler() {
   count = 0;
 }
 
 // 拷贝构造，没用
-RRThreadScheduler::RRThreadScheduler(RRThreadScheduler &scheduler, map<unsigned, Thread *> &threadMap) {
-  for (list<Thread *>::iterator ti = scheduler.queue.begin(), te = scheduler.queue.end(); ti != te; ti++) {
-    queue.push_back(threadMap[(*ti)->threadId]);
+RRThreadScheduler::RRThreadScheduler(const RRThreadScheduler &scheduler) : count(scheduler.count) {
+  for (Thread *thread : scheduler.queue) {
+    queue.push_back(new Thread(*thread)); // Глубокое копирование
   }
 }
 
-RRThreadScheduler::~RRThreadScheduler() {}
+/*RRThreadScheduler::~RRThreadScheduler() {
+  for (Thread* thread : queue) {
+    delete thread;
+  }
+}*/
+
+ThreadScheduler::ThreadSchedulerType RRThreadScheduler::getType() const { return ThreadScheduler::RR; }
+const std::list<Thread*>& RRThreadScheduler::getQueue() const { return queue; }
+ThreadScheduler* RRThreadScheduler::clone() const { return new RRThreadScheduler(*this); }
+
+void RRThreadScheduler::setQueue(std::list<Thread*> newQueue) {
+  queue = std::move(newQueue); // используем std::move для эффективности
+}
 
 // 考虑使用迭代器而不是front();
 Thread *RRThreadScheduler::selectCurrentItem() {
@@ -129,13 +141,25 @@ void RRThreadScheduler::setCountZero() {
 
 FIFSThreadScheduler::FIFSThreadScheduler() {}
 
-FIFSThreadScheduler::FIFSThreadScheduler(FIFSThreadScheduler &scheduler, map<unsigned, Thread *> &threadMap) {
-  for (list<Thread *>::iterator ti = scheduler.queue.begin(), te = scheduler.queue.end(); ti != te; ti++) {
-    queue.push_back(threadMap[(*ti)->threadId]);
+FIFSThreadScheduler::FIFSThreadScheduler(const FIFSThreadScheduler& scheduler) {  // <<< ДОБАВЛЕНО
+  for (Thread* thread : scheduler.queue) {
+    queue.push_back(new Thread(*thread)); // Глубокое копирование
   }
 }
 
-FIFSThreadScheduler::~FIFSThreadScheduler() {}
+/*FIFSThreadScheduler::~FIFSThreadScheduler() {
+  for (Thread* thread : queue) {
+    delete thread;
+  }
+}*/
+
+ThreadScheduler::ThreadSchedulerType FIFSThreadScheduler::getType() const { return ThreadScheduler::FIFS; }
+const std::list<Thread*>& FIFSThreadScheduler::getQueue() const { return queue; }
+ThreadScheduler* FIFSThreadScheduler::clone() const { return new FIFSThreadScheduler(*this); }
+
+void FIFSThreadScheduler::setQueue(std::list<Thread*> newQueue) {
+  queue = std::move(newQueue); 
+}
 
 Thread *FIFSThreadScheduler::selectCurrentItem() {
   return selectNextItem();
@@ -195,14 +219,25 @@ void FIFSThreadScheduler::reSchedule() {
 
 PreemptiveThreadScheduler::PreemptiveThreadScheduler() {}
 
-PreemptiveThreadScheduler::PreemptiveThreadScheduler(PreemptiveThreadScheduler &scheduler,
-                                                     map<unsigned, Thread *> &threadMap) {
-  for (list<Thread *>::iterator ti = scheduler.queue.begin(), te = scheduler.queue.end(); ti != te; ti++) {
-    queue.push_back(threadMap[(*ti)->threadId]);
+PreemptiveThreadScheduler::PreemptiveThreadScheduler(const PreemptiveThreadScheduler& scheduler) { // <<< ДОБАВЛЕНО
+  for (Thread* thread : scheduler.queue) {
+    queue.push_back(new Thread(*thread)); // Глубокое копирование
   }
 }
 
-PreemptiveThreadScheduler::~PreemptiveThreadScheduler() {}
+/*PreemptiveThreadScheduler::~PreemptiveThreadScheduler() {
+  for (Thread* thread : queue) {
+    delete thread;
+  }
+}*/
+
+ThreadScheduler::ThreadSchedulerType PreemptiveThreadScheduler::getType() const { return ThreadScheduler::Preemptive; }
+const std::list<Thread*>& PreemptiveThreadScheduler::getQueue() const { return queue; }
+ThreadScheduler* PreemptiveThreadScheduler::clone() const { return new PreemptiveThreadScheduler(*this); }
+
+void PreemptiveThreadScheduler::setQueue(std::list<Thread*> newQueue) {
+  queue = std::move(newQueue);
+}
 
 Thread *PreemptiveThreadScheduler::selectCurrentItem() {
   return selectNextItem();
@@ -267,8 +302,38 @@ GuidedThreadScheduler::GuidedThreadScheduler(ExecutionState *state, ThreadSchedu
   subScheduler = getThreadSchedulerByType(schedulerType);
 }
 
-GuidedThreadScheduler::~GuidedThreadScheduler() {
-  delete subScheduler;
+GuidedThreadScheduler::GuidedThreadScheduler(const GuidedThreadScheduler &other) 
+    : prefix(other.prefix), state(other.state) {
+  subScheduler = other.subScheduler->clone();
+}
+
+ThreadScheduler::ThreadSchedulerType GuidedThreadScheduler::getType() const { //  Полное имя типа
+  assert(subScheduler && "subScheduler is null");
+  return subScheduler->getType();
+}
+
+const std::list<Thread*>& GuidedThreadScheduler::getQueue() const {
+  assert(subScheduler && "subScheduler is null");
+  return subScheduler->getQueue();
+}
+
+ThreadScheduler* GuidedThreadScheduler::clone() const {
+    return new GuidedThreadScheduler(*this);
+}
+
+
+/*GuidedThreadScheduler::~GuidedThreadScheduler() {
+    delete subScheduler;
+    subScheduler = nullptr;
+}*/
+
+void GuidedThreadScheduler::setQueue(std::list<Thread*> newQueue) {
+
+    std::list<Thread*> copiedQueue;
+    for (Thread* thread : newQueue) {
+        copiedQueue.push_back(new Thread(*thread));  // Создаем новые копии потоков
+    }
+    subScheduler->setQueue(std::move(copiedQueue)); //  Обновляем очередь подпланировщика
 }
 
 Thread *GuidedThreadScheduler::selectCurrentItem() {
