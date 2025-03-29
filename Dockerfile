@@ -47,6 +47,9 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt -y --no-install-recommends 
 # Copy across source files needed for build
 COPY --chown=klee:klee . /tmp/klee_src/
 
+# Grant execute permission to the build script
+RUN chmod +x /tmp/klee_src/scripts/build/build.sh
+
 # Build and set klee user to be owner
 RUN /tmp/klee_src/scripts/build/build.sh --debug --install-system-deps klee && chown -R klee:klee /tmp/klee_build* && pip3 install flask wllvm && \
     rm -rf /var/lib/apt/lists/*

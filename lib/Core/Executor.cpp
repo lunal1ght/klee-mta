@@ -2006,6 +2006,13 @@ void Executor::transferToBasicBlock(BasicBlock *dst, BasicBlock *src,
   // instructions know which argument to eval, set the pc, and continue.
   
   // XXX this lookup has to go ?
+  
+  if (state.currentStack->realStack.empty()) {
+	// Что делать? Выдать ошибку? Завершить состояние?
+    terminateStateOnError(state, "Attempted to transfer with empty stack", Executor::User);
+    return; // Или другой способ прервать выполнение для этого состояния?
+  }
+  
   KFunction *kf = state.currentStack->realStack.back().kf;
   unsigned entry = kf->basicBlockEntry[dst];
   state.currentThread->pc = &kf->instructions[entry];

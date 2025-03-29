@@ -137,6 +137,15 @@ ExecutionState::ExecutionState(const ExecutionState& state):
     newQueue.push_back(threadMap[thread]); // Копируем указатель на новый поток
   }
     threadScheduler->setQueue(newQueue);
+  if (currentThread) { // Проверка на всякий случай
+    currentStack = currentThread->stack; // ПРЕДПОЛОЖЕНИЕ: у Thread есть поле 'stack'
+  } else {
+  // Что делать, если currentThread не найден? Возможно, ошибка?
+  // Или скопировать из родителя?
+  // Безопаснее может быть установить в nullptr или вызвать ошибку.
+    currentStack = nullptr; // Или обработать как ошибку
+    assert(0 && "currentThread not found after copy");
+  }
 }
 
 ExecutionState *ExecutionState::branch() {
