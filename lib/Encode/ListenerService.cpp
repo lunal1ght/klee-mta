@@ -52,12 +52,12 @@ ListenerService::~ListenerService() {
   *os << rdManager->getResultString();
   os->flush();
   interpreterHandler->setNumPathsDistrinct(rdManager->getTestedPathsNumber());
-  for (auto listener : bitcodeListeners) {
+  /*for (auto listener : bitcodeListeners) {
     delete listener;
-  }
+  }*/
   delete encoder;
-  delete rdManager;
   delete dtam;
+  delete rdManager;
 }
 
 void ListenerService::pushListener(BitcodeListener *bitcodeListener) {
