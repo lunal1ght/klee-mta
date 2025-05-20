@@ -26,7 +26,8 @@ Event::Event(unsigned threadId, unsigned eventId, string eventName, KInstruction
              string globalName, EventType eventType)
     : threadId(threadId), eventId(eventId), eventName(eventName), inst(inst), name(varName), globalName(globalName),
       eventType(eventType), latestWriteEventInSameThread(NULL), isGlobal(false), isEventRelatedToBranch(false),
-      isConditionInst(false), brCondition(false), isFunctionWithSourceCode(true), calledFunction(NULL) {
+      isConditionInst(false), brCondition(false), isFunctionWithSourceCode(true), calledFunction(NULL), concreteAddress(0), accessSize(0)
+      {
   threadEventId = 0;
 }
 

@@ -11,6 +11,7 @@
 
 #include "klee/Thread/MutexScheduler.h"
 #include <string>
+#include "llvm/Support/raw_ostream.h"
 
 namespace klee {
 
@@ -28,9 +29,15 @@ private:
   // MutexScheduler* blockedList;
 
 public:
+
+  Mutex(unsigned id, const std::string& name); // Обычный конструктор (изменил string на const string&)
+  //Mutex(const Mutex& other);                   // Конструктор копирования
+
   bool isMutexLocked() {
     return isLocked;
   }
+
+  bool isCurrentlyLocked() const;
 
   unsigned getLockedThread() {
     return lockedThreadId;
@@ -42,8 +49,6 @@ public:
   bool isThreadOwnMutex(unsigned threadId);
   //	void addToBlockedList(Thread* thread);
   //	void removeFromBlockedList(Thread* thread);
-
-  Mutex(unsigned id, std::string name);
 
   virtual ~Mutex();
 };

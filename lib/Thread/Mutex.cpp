@@ -13,13 +13,29 @@ using namespace ::std;
 
 namespace klee {
 
-Mutex::Mutex(unsigned id, string name) : id(id), name(name), isLocked(false), lockedThreadId(0) {}
+Mutex::Mutex(unsigned id, const std::string& name)
+    : id(id), name(name), isLocked(false), lockedThreadId(0) {
+    llvm::errs() << "Mutex CONSTRUCTED (original): Name=" << name << ", ID=" << id << ", this=" << this << "\n"; // Отладка
+}
+/*
+Mutex::Mutex(const Mutex& other)
+    : id(other.id), name(other.name + "_copy"), // Добавим "_copy" к имени для отладки
+      isLocked(other.isLocked), lockedThreadId(other.lockedThreadId) {
+    llvm::errs() << "Mutex COPIED: Name=" << name << ", ID=" << id << ", this=" << this << " from " << &other << "\n"; // Отладка
+}
+*/
+
+//недоработанная логика мьютексов
 
 Mutex::~Mutex() {}
 
 void Mutex::lock(unsigned threadId) {
   this->lockedThreadId = threadId;
   this->isLocked = true;
+}
+
+bool Mutex::isCurrentlyLocked() const {
+  return isLocked;
 }
 
 void Mutex::unlock() {

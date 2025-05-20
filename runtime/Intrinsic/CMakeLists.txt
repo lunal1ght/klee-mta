@@ -16,6 +16,7 @@ set(SRC_FILES
         klee_is_replay.c
         klee_overshift_check.c
         klee_range.c
+        klee_assert_race_stub.c
         )
 
 # Build it

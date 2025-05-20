@@ -351,15 +351,42 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
         ref<Expr> address = executor->eval(ki, 0, state).value;
         ObjectPair op;
 #if DEBUG_RUNTIME_LISTENER
-        ref<Expr> addressCurrent = executor->evalCurrent(ki, 0, state).value;
+        ref<Expr> addressCurrent = executor->eval(ki, 0, state).value;
+        item->instParameter.push_back(address);
         llvm::errs() << "address : " << address << " address Current : " << addressCurrent << "\n";
         bool successCurrent = executor->getMemoryObject(op, state, state.currentThread->addressSpace, addressCurrent);
         llvm::errs() << "successCurrent : " << successCurrent << "\n";
 #endif
         ConstantExpr *realAddress = dyn_cast<ConstantExpr>(address);
         if (!realAddress) {
+          std::string exprString;
+          llvm::raw_string_ostream exprStream(exprString);
+          address->print(exprStream);
+          klee_warning("Symbolic address encountered in PSOListener for Load: %s. Ignoring event.", exprStream.str().c_str());
+          item->eventType = Event::IGNORE;
           assert(0 && " address is not const");
-        }
+        } else {
+          item->concreteAddress = realAddress->getZExtValue(); // <<< ЗАПОЛНЯЕМ
+          item->accessSize = executor->getWidthForLLVMType(ki->inst->getType()) / 8; // <<< ЗАПОЛНЯЕМ
+
+          if (item->eventType != Event::IGNORE) { // Только если событие не игнорируется
+            llvm::errs() << "PSOListener DEBUG: Load Event: Addr=0x" << llvm::utohexstr(item->concreteAddress)
+                         << ", Size=" << item->accessSize
+                         << ", File=" << (ki->info ? ki->info->file : "N/A")
+                         << ", Line=" << (ki->info ? ki->info->line : 0) << "\n";
+          }
+          
+          ObjectPair op;
+          bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
+            if (success) {
+              uint64_t key = item->concreteAddress; // Используем уже полученный concreteAddress
+              const MemoryObject *mo = op.first;
+            } else {
+                llvm::errs() << "PSOListener: Load resolve unsuccessful for address " << realAddress->getZExtValue() << "\n";
+                assert(0 && "PSOListener: load resolve unsuccess");
+            }
+          }
+          
         uint64_t key = realAddress->getZExtValue();
         bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
         if (!success) {
@@ -392,25 +419,36 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
 
     case Instruction::Store: {
       ref<Expr> value = executor->eval(ki, 0, state).value;
-      item->instParameter.push_back(value);
+      item->instParameter.push_back(value); // Сохраняем value
+      // ---> ОБЪЯВЛЯЕМ address ОДИН РАЗ В НАЧАЛЕ <---
+      ref<Expr> address = executor->eval(ki, 1, state).value;
+      item->instParameter.push_back(address); // Сохраняем address
+
       ConstantExpr *realValue = dyn_cast<ConstantExpr>(value);
       if (realValue) {
         Type *valueTy = ki->inst->getOperand(0)->getType();
         if (valueTy->isPointerTy()) {
-          // llvm::errs() << "valueTy->isPointerTy()\n";
           uint64_t startAddress = realValue->getZExtValue();
           valueTy = valueTy->getPointerElementType();
           executor->createSpecialElement(state, valueTy, startAddress, false);
         }
       }
-      // llvm::errs() << "PSO Store\n";
-      ref<Expr> address = executor->eval(ki, 1, state).value;
+
       ConstantExpr *realAddress = dyn_cast<ConstantExpr>(address);
-      // llvm::errs() << "address : ";
-      // address->dump();
+
       if (realAddress) {
-        uint64_t key = realAddress->getZExtValue();
-        // llvm::errs() << "key : " << key << "\n";
+        // ---> БЛОК ДЛЯ КОНКРЕТНОГО АДРЕСА <---
+        item->concreteAddress = realAddress->getZExtValue();
+        item->accessSize = value->getWidth() / 8;
+        
+        if (item->eventType != Event::IGNORE) { // Только если событие не игнорируется
+          llvm::errs() << "PSOListener DEBUG: Store Event: Addr=0x" << llvm::utohexstr(item->concreteAddress)
+                       << ", Size=" << item->accessSize
+                       << ", File=" << (ki->info ? ki->info->file : "N/A")
+                       << ", Line=" << (ki->info ? ki->info->line : 0) << "\n";
+        }
+
+        uint64_t key = item->concreteAddress; // Используем сохраненное значение
         ObjectPair op;
         bool success = executor->getMemoryObject(op, state, state.currentStack->addressSpace, address);
         if (success) {
@@ -429,19 +467,30 @@ void PSOListener::beforeExecuteInstruction(ExecutionState &state, KInstruction *
 #if SUPPORT_PTR
           if (item->isGlobal) {
 #else
-          if (!inst->getOperand(0)->getType()->isPointerTy() && item->isGlobal) {
+          if (!ki->inst->getOperand(0)->getType()->isPointerTy() && item->isGlobal) {
 #endif
             trace->insertWriteSet(varName, item);
           }
         } else {
-          llvm::errs() << "Store address = " << realAddress->getZExtValue() << "\n";
-          assert(0 && "store resolve unsuccess");
+          llvm::errs() << "PSOListener: Store resolve unsuccessful for address " << realAddress->getZExtValue() << "\n";
+          assert(0 && "PSOListener: store resolve unsuccess");
         }
       } else {
-        assert(0 && " address is not const");
+        // ---> БЛОК ДЛЯ СИМВОЛИЧЕСКОГО АДРЕСА (ВНУТРИ ELSE от if (realAddress)) <---
+        std::string exprString;
+        llvm::raw_string_ostream exprStream(exprString);
+        // 'address' здесь доступна, так как объявлена в начале блока 'case'
+        address->print(exprStream);
+        klee_warning("Symbolic address encountered in PSOListener for Store: %s. Ignoring event.", exprStream.str().c_str());
+        item->eventType = Event::IGNORE;
+        // Возможно, здесь тоже нужен assert, если символические адреса для Store не должны обрабатываться дальше
+        // assert(0 && "PSOListener: symbolic store address not fully handled for race detection yet");
       }
       break;
     }
+    
+    
+    
     case Instruction::Switch: {
       ref<Expr> cond = executor->eval(ki, 0, state).value;
       item->instParameter.push_back(cond);

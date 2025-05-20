@@ -27,6 +27,16 @@
 using namespace llvm;
 namespace klee {
 
+//added notby xdzhang xdddddzhang
+struct AccessInfo {
+    unsigned threadId;
+    bool isWrite;      // true для Store, false для Load
+    std::string file;
+    unsigned line;
+    std::string instructionString; // Текстовое представление инструкции
+    // Опционально: можно добавить время/порядковый номер события, значение (если конкретное)
+};
+
 // added by xdzhang
 struct Wait_Lock {
   Event *wait;
@@ -97,6 +107,9 @@ public:
   std::set<std::string> DTAMSerialMap;
   std::set<std::string> DTAMParallelMap;
   std::set<std::string> DTAMhybridMap;
+  
+  // Новый метод для получения истории доступов
+  std::vector<AccessInfo> getAccessHistoryForAddress(uint64_t target_address, size_t target_size, KModule *kmodule); // Добавили kmodule
 
   Trace();
 

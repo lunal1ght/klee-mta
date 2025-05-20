@@ -160,6 +160,9 @@ namespace klee {
     HANDLER(handlePThreadBarrierDestory);
     HANDLER(handlePThreadSelf);
     HANDLER(handleValloc);
+    //пченье
+    HANDLER(handlePThreadMutexInit);
+    HANDLER(handlePThreadMutexDestroy);
     //@hy
     HANDLER(handleMakeTaint);
     HANDLER(handleSendData);

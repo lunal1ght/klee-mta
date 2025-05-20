@@ -55,6 +55,11 @@ public:
   std::vector<unsigned> vectorClock;
   std::vector<ref<klee::Expr>> instParameter;
   std::vector<ref<klee::Expr>> relatedSymbolicExpr;
+  
+  // ---> НОВЫЕ ПОЛЯ <---
+  uint64_t concreteAddress; // Для хранения конкретного адреса Load/Store
+  size_t accessSize;        // Для хранения размера доступа в байтах
+  // ---> КОНЕЦ НОВЫХ ПОЛЕЙ <---
 
   Event();
   Event(unsigned threadId, unsigned eventId, std::string eventName, KInstruction *inst, std::string globalVarName,

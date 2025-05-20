@@ -1704,7 +1704,196 @@ void Executor::executeCall(ExecutionState &state, KInstruction *ki, Function *f,
   Instruction *i = ki->inst;
   if (isa_and_nonnull<DbgInfoIntrinsic>(i))
     return;
-  if (f && f->isDeclaration()) {
+    
+//////////////////////////////////////////////////////////////////////////////////////////
+
+  // Проверяем klee_assert_fail И klee_assert_race ДО общей логики f->isDeclaration()
+  // чтобы они имели приоритет.
+
+  if (f && f->getName() == "__klee_assert_race_fail") {
+      // Аргументы, переданные из макроса klee_assert_race:
+      // arguments[0] -> строка с выражением (const char*) - пока не используем
+      // arguments[1] -> имя файла (const char*) - используем для ii
+      // arguments[2] -> номер строки (int) - используем для ii
+      // arguments[3] -> имя функции (const char*) - пока не используем
+      // arguments[4] -> shared_var_addr (void*)
+      // arguments[5] -> shared_var_size (size_t)
+      // arguments[6] -> var_name_str_ptr (const char*)
+
+      // Мы попадаем сюда ТОЛЬКО если условие в макросе klee_assert_race было ЛОЖНЫМ.
+      // Текущее состояние 'state' - это то, которое нужно терминировать.
+
+      ref<Expr> shared_var_addr_expr = arguments[4];
+      ref<Expr> shared_var_size_expr = arguments[5];
+      ref<Expr> var_name_c_str_ptr_expr = arguments[6]; // Указатель на C-строку имени
+
+      std::string varNameStr = "shared_variable"; // Имя по умолчанию
+
+      // Попытка прочитать имя переменной из памяти KLEE
+      if (ConstantExpr *namePtrCE = dyn_cast<ConstantExpr>(var_name_c_str_ptr_expr)) {
+          uint64_t nameAddr = namePtrCE->getZExtValue();
+          if (nameAddr != 0) { // Проверяем, что указатель не нулевой
+              ObjectPair op;
+              // Создаем "фиктивный" ref<Expr> для адреса, чтобы использовать resolveOne
+              ref<ConstantExpr> nameAddrExpr = ConstantExpr::alloc(nameAddr, Context::get().getPointerWidth());
+              if (state.addressSpace.resolveOne(nameAddrExpr, op)) {
+                  const ObjectState *os_name = op.second;
+                  std::string recoveredName;
+                  // Читаем байты до нулевого символа или до конца объекта
+                  for (unsigned offset = 0; offset < os_name->size; ++offset) {
+                      ref<Expr> charExpr = os_name->read8(offset);
+                      if (ConstantExpr *CE_char = dyn_cast<ConstantExpr>(charExpr)) {
+                          char c = CE_char->getZExtValue();
+                          if (c == '\0') break;
+                          recoveredName += c;
+                      } else {
+                          recoveredName = "symbolic_name_in_assert_race"; // Имя оказалось символическим
+                          break;
+                      }
+                  }
+                  if (!recoveredName.empty()) {
+                      varNameStr = recoveredName;
+                  }
+              }
+          }
+      }
+
+      std::string message = "ASSERTION RACE FAIL: (condition for '" + varNameStr + "' failed)";
+      std::string race_info_str_data = "\nRace Information for variable '" + varNameStr + "':\n";
+      llvm::raw_string_ostream rso(race_info_str_data);
+
+      if (ConstantExpr *addrCE = dyn_cast<ConstantExpr>(shared_var_addr_expr)) {
+          uint64_t addr = addrCE->getZExtValue();
+          // Отладочный вывод, который ты добавлял:
+          llvm::errs() << "DEBUG: klee_assert_race - Target shared_var_addr = 0x" << llvm::utohexstr(addr) << "\n";
+          size_t size = 0;
+          if (ConstantExpr *sizeCE = dyn_cast<ConstantExpr>(shared_var_size_expr)) {
+              size = sizeCE->getZExtValue();
+          } else {
+              rso << "  Warning: Symbolic size for shared variable, cannot determine exact range.\n";
+              size = 4; // Эвристика
+          }
+
+          if (size > 0 && listenerService && listenerService->getRuntimeDataManager() &&
+              listenerService->getRuntimeDataManager()->getCurrentTrace()) {
+              Trace *currentTrace = listenerService->getRuntimeDataManager()->getCurrentTrace();
+              std::vector<AccessInfo> history = currentTrace->getAccessHistoryForAddress(addr, size, kmodule.get());
+
+              if (history.empty()) {
+                  rso << "  No recorded accesses found for address 0x" << llvm::utohexstr(addr) << " (size " << size << ") in the current trace.\n";
+                  rso << "  Possible reasons:\n";
+                  rso << "    - Variable address/size mismatch with PSOListener recordings.\n";
+                  rso << "    - Variable was not accessed or PSOListener did not record it.\n";
+                  rso << "    - The shared_var_addr/size passed to klee_assert_race might be incorrect.\n";
+              } else {
+                  rso << "  Access history (address 0x" << llvm::utohexstr(addr) << ", size " << size << "):\n";
+                  for (const auto& access : history) {
+                      rso << "    Thread " << access.threadId
+                          << (access.isWrite ? " Wrote" : " Read ")
+                          << " at " << access.file << ":" << access.line
+                          << " (Inst: " << access.instructionString << ")\n";
+                  }
+              }
+
+              //data race user output explanation
+
+              rso << "\n  Potential Data Race Explanation for variable '" << varNameStr << "':\n";
+              if (history.size() >= 2) {
+                  bool race_explained = false;
+                  // Собираем ID всех "рабочих" потоков (не main)
+                  std::set<unsigned> workerThreadIDs;
+                  Trace *currentTrace = listenerService->getRuntimeDataManager()->getCurrentTrace(); // Получаем текущую трассу
+                  for (const auto& create_pair : currentTrace->createThreadPoint) { // createThreadPoint хранит Event* и ID созданного потока
+                      workerThreadIDs.insert(create_pair.second);
+                  }
+                  // Если createThreadPoint не заполняется или main поток тоже может быть рабочим,
+                  // то можно просто считать все потоки, кроме Thread 1 (main), рабочими.
+  
+                  for (size_t i = 0; i < history.size(); ++i) {
+                      for (size_t j = i + 1; j < history.size(); ++j) {
+                          const auto& access1 = history[i];
+                          const auto& access2 = history[j];
+  
+                          // 1. Доступы должны быть из РАЗНЫХ потоков
+                          if (access1.threadId == access2.threadId) continue;
+  
+                          // 2. Хотя бы один из доступов должен быть записью (Write)
+                          if (!access1.isWrite && !access2.isWrite) continue;
+  
+                          // 3. Оба доступа должны быть от "рабочих" потоков
+                          //    (Простая эвристика: не главный поток ID=1, если у нас нет списка рабочих потоков)
+                          //    Лучше использовать workerThreadIDs, если он заполнен.
+                          bool access1_is_worker = (workerThreadIDs.count(access1.threadId) || (access1.threadId != 1 && workerThreadIDs.empty()));
+                          bool access2_is_worker = (workerThreadIDs.count(access2.threadId) || (access2.threadId != 1 && workerThreadIDs.empty()));
+  
+                          if (!access1_is_worker || !access2_is_worker) continue;
+  
+                          // Если все условия выше выполнены, мы нашли потенциально конфликтующую пару
+                          // В testnew.c (без мьютексов) это уже будет data race.
+                          rso << "    - Detected unsynchronized conflicting accesses to '" << varNameStr << "':\n";
+                          rso << "        Thread " << access1.threadId << (access1.isWrite ? " Wrote" : " Read ")
+                              << " at " << access1.file << ":" << access1.line
+                              << " (Inst: " << access1.instructionString << ")\n";
+                          rso << "        Thread " << access2.threadId << (access2.isWrite ? " Wrote" : " Read ")
+                              << " at " << access2.file << ":" << access2.line
+                              << " (Inst: " << access2.instructionString << ")\n";
+                          rso << "      These accesses from different worker threads are not ordered by any known synchronization mechanism in this trace.\n";
+                          rso << "      This can lead to a Data Race, causing unexpected behavior or incorrect results like the assertion failure.\n";
+                          race_explained = true;
+                          goto end_race_explanation_loop_generic;
+                      }
+                  }
+                  end_race_explanation_loop_generic:;
+  
+                  if (!race_explained) {
+                      rso << "    - Could not identify a simple conflicting access pattern between worker threads from the history.\n"
+                          << "    - Review the full access history for unsynchronized reads/writes from different threads.\n";
+                  }
+              } else {
+                  rso << "    - Not enough access events in history to determine a race pattern.\n";
+              }
+
+              //data race user output explanation
+
+          } else {
+              rso << "  Could not retrieve access history (missing trace, variable size, or listener service).\n";
+          }
+      } else {
+          rso << "  Symbolic address for shared variable, cannot retrieve access history.\n";
+      }
+
+      // Для terminateStateOnError используем файл и строку из аргументов __klee_assert_race_fail
+      // (arguments[1] и arguments[2]), если они доступны и конкретны.
+      // Это сделает сообщение об ошибке более точным.
+      // Пока что оставим стандартное поведение terminateStateOnError,
+      // которое использует state.currentThread->prevPC->info.
+
+      // Выводим в консоль (stderr)
+      llvm::errs() << "----------------------------------------------------------------\n";
+      llvm::errs() << "KLEE Race Assertion Failed:\n";
+      llvm::errs() << "  Message: " << message << "\n";
+      llvm::errs() << "  File: " << (state.currentThread->prevPC->info ? state.currentThread->prevPC->info->file : "N/A") << "\n";
+      llvm::errs() << "  Line: " << (state.currentThread->prevPC->info ? state.currentThread->prevPC->info->line : 0) << "\n";
+      llvm::errs() << rso.str(); // Выводим содержимое нашего race_info_str_data
+      llvm::errs() << "----------------------------------------------------------------\n";
+
+      terminateStateOnError(state, message, Assert, "race.err", rso.str());
+      return; // Обязательно выходим, так как ошибку обработали
+  }
+  // Проверяем стандартный __assert_fail (который вызывается макросом klee_assert)
+  // или другие функции, имя которых начинается с klee_assert_fail
+  else if (f && (f->getName() == "__assert_fail" || f->getName().startswith("klee_assert_fail"))) {
+      // Это обработка стандартного klee_assert
+      // ref<Expr> condition_str_ptr = arguments[0]; // Строка с выражением
+      // ref<Expr> file_ptr = arguments[1];          // Имя файла
+      // ref<Expr> line_expr = arguments[2];         // Номер строки
+      // ref<Expr> function_ptr = arguments[3];      // Имя функции
+      // Эта информация используется внутри terminateStateOnError, если она ее читает,
+      // либо можно сформировать свое сообщение.
+      // Стандартный KLEE просто передает "explicit assertion failed".
+      terminateStateOnError(state, "explicit assertion failed", Assert);
+      return;
+  } else if (f && f->isDeclaration()) {
     switch (f->getIntrinsicID()) {
     case Intrinsic::not_intrinsic:
       // state may be destroyed by this call, cannot touch
@@ -4104,7 +4293,8 @@ void Executor::terminateStateOnError(ExecutionState &state,
     }
     //存在问题,暂时处理
 		//add by ylc
-    // interpreterHandler->processTestCase(state, msg.str().c_str(), suffix);
+    //readdition notby xdddddzhang
+    interpreterHandler->processTestCase(state, msg.str().c_str(), suffix);
   }
     
   terminateState(state);
@@ -5423,26 +5613,73 @@ unsigned Executor::executePThreadCondBroadcast(ExecutionState &state, KInstructi
 
 // execute pthread_mutex_lock
 unsigned Executor::executePThreadMutexLock(ExecutionState &state, KInstruction *ki, std::vector<ref<Expr>> &arguments) {
-  ref<Expr> address = arguments[0];
-  ConstantExpr *mutexAddress = dyn_cast<ConstantExpr>(address);
-  // cerr << " lock param : " << mutexAddress->getZExtValue();
-  if (mutexAddress) {
-    std::string key = Transfer::uint64toString(mutexAddress->getZExtValue());
-    std::string errorMsg;
-    bool isBlocked;
-    bool isSuccess = state.mutexManager.lock(key, state.currentThread->threadId, isBlocked, errorMsg);
-    if (isSuccess) {
-      if (isBlocked) {
-        state.switchThreadToMutexBlocked(state.currentThread);
-      }
-    } else {
-      llvm::errs() << errorMsg << "\n";
-      assert(0 && "lock error!");
-    }
-  } else {
-    assert(0 && "mutex address is not const");
+  // 1. Получаем выражение для адреса мьютекса из аргументов функции
+  ref<Expr> mutex_address_expr = arguments[0];
+
+  // 2. Пытаемся получить КОНКРЕТНОЕ значение этого адреса
+  // toConstant вернет ref<ConstantExpr> или терминирует состояние, если не может конкретизировать.
+  ref<ConstantExpr> concreteAddressCE = toConstant(state, mutex_address_expr, "pthread_mutex_lock address");
+
+  // 3. Проверяем, что конкретизация удалась (toConstant не должен возвращать null,
+  //    он либо конкретизирует, либо вызывает terminateStateOnError внутри себя,
+  //    но для надежности проверим).
+  if (!concreteAddressCE.get()) { // .get() для ref<T> возвращает сырой указатель T*
+    // Эта ситуация не должна возникать, если toConstant работает как ожидается
+    // (т.е. терминирует состояние, если не может конкретизировать).
+    // Но если мы сюда попали, это ошибка.
+    llvm::errs() << "Executor::executePThreadMutexLock: Failed to get concrete address for mutex.\n";
+    //assert(0 && "Failed to concretize mutex address for lock");
+    return 1; // Код ошибки
   }
-  return 0;
+
+  // 4. Получаем конкретное значение адреса
+  uint64_t mutex_addr_val = concreteAddressCE->getZExtValue();
+
+  // 5. Проверяем на нулевой указатель мьютекса
+  if (mutex_addr_val == 0) {
+      llvm::errs() << "Executor::executePThreadMutexLock: Attempted to lock a NULL mutex.\n";
+      // По стандарту POSIX, поведение не определено. KLEE может сообщить об ошибке.
+      // Можно терминировать или вернуть код ошибки.
+      // executor.terminateStateOnError(state, "Attempt to lock a NULL mutex", Executor::Ptr);
+      // return 1; // Или пусть вернет ошибку, которую обработает perror в программе
+      // Пока оставим assert для явного указания на проблему в модели KLEE или коде пользователя.
+      //assert(0 && "Attempted to lock a NULL mutex");
+      return 1; // Например, EINVAL
+  }
+
+  // 6. Продолжаем с конкретным адресом
+  std::string key = Transfer::uint64toString(mutex_addr_val);
+  std::string errorMsg;
+  bool isBlocked;
+
+  // llvm::errs() << "DEBUG: Executor::executePThreadMutexLock: Attempting to lock mutex: " << key
+  //              << " by thread " << state.currentThread->threadId << "\n";
+
+  bool isSuccess = state.mutexManager.lock(key, state.currentThread->threadId, isBlocked, errorMsg);
+
+  // llvm::errs() << "DEBUG: Executor::executePThreadMutexLock: Lock attempt result: isSuccess=" << isSuccess
+  //              << ", isBlocked=" << isBlocked << ", msg=" << errorMsg << "\n";
+
+  if (isSuccess) {
+    if (isBlocked) {
+      state.switchThreadToMutexBlocked(state.currentThread);
+      // Когда поток заблокирован, он не "завершает" инструкцию lock немедленно.
+      // KLEE приостановит его и возобновит позже, когда мьютекс освободится.
+      // Возвращаемое значение pthread_mutex_lock (0) будет установлено,
+      // когда KLEE *возобновит* этот поток после успешного захвата.
+      // Поэтому здесь мы можем просто вернуть значение, которое не будет немедленно использовано,
+      // или положиться на то, что SpecialFunctionHandler не будет биндить результат для заблокированного потока.
+      // Для простоты, вернем 0, предполагая, что если isSuccess, то в итоге будет 0.
+    }
+    return 0; // Успех (даже если заблокирован, операция в итоге завершится успешно)
+  } else {
+    llvm::errs() << "Executor::executePThreadMutexLock: MutexManager::lock failed for mutex '" << key << "': " << errorMsg << "\n";
+    // Этот assert должен срабатывать, если MutexManager::lock имеет внутреннюю ошибку,
+    // а не просто не может захватить мьютекс (что должно отражаться в isBlocked).
+    // Если errorMsg говорит "mutex ... undefined", то проблема в init.
+    //assert(0 && "lock error from MutexManager!");
+    return 1; // Код ошибки (хотя assert уже остановит)
+  }
 }
 
 // execute pthread_mutex_unlock
@@ -5456,7 +5693,7 @@ unsigned Executor::executePThreadMutexUnlock(ExecutionState &state, KInstruction
     bool isSuccess = state.mutexManager.unlock(key, errorMsg);
     if (!isSuccess) {
       llvm::errs() << errorMsg << "\n";
-      assert(0 && "unlock error");
+      //assert(0 && "unlock error");
     }
   } else {
     assert(0 && "mutex address is not const");

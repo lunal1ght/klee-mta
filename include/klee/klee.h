@@ -158,6 +158,26 @@ extern "C" {
 
   /* Get errno value of the current state */
   int klee_get_errno(void);
+  
+  void __klee_assert_race_fail(const char *expr, const char *file, unsigned line, const char *func, void* shared_var_addr, size_t shared_var_size, const char* var_name);
+  
+  #define klee_assert_race(condition, addr, size, name) \
+  ((condition)                                        \
+   ? (void) (0)                                       \
+   : __klee_assert_race_fail (#condition, __FILE__, __LINE__, __PRETTY_FUNCTION__, \
+                              (addr), (size), (name)))
+
+  /// \brief Asserts that the given condition is true. If the condition is
+  /// false, a KLEE error is generated, and this state is terminated.
+  /// This version is intended for asserting properties related to shared
+  /// variables potentially involved in a data race.
+  ///
+  /// \param condition The condition to assert.
+  /// \param shared_var_addr Address of the shared variable.
+  /// \param shared_var_size Size of the shared variable.
+  /// \param var_name A descriptive name for the shared variable.
+//  void klee_assert_race(int condition, void* shared_var_addr, size_t shared_var_size, const char* var_name);
+
 #ifdef __cplusplus
 }
 #endif

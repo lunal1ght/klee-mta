@@ -30,6 +30,7 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "klee/Encode/Transfer.h"
 
 #include <errno.h>
 #include <sstream>
@@ -149,7 +150,9 @@ static SpecialFunctionHandler::HandlerInfo handlerInfo[] = {
     add("pthread_cancel", handlePThreadCancel, true),
     add("pthread_join", handlePThreadJoin, true),
     add("pthread_testcancel", handlePThreadTestCancel, false),
-    //		add("pthread_mutex_init", handlePThreadMutexInit, true),
+    //pchenb
+    add("pthread_mutex_init", handlePThreadMutexInit, true), //анкомент пченья
+    add("pthread_mutex_destroy", handlePThreadMutexDestroy, true), //пченье нарисовау
     ////KLEE自带了External机制
     add("pthread_mutex_lock", handlePThreadMutexLock, true),
     add("pthread_mutex_unlock", handlePThreadMutexUnlock, true),
@@ -201,7 +204,7 @@ SpecialFunctionHandler::SpecialFunctionHandler(Executor &_executor)
 void SpecialFunctionHandler::prepare(
     std::vector<const char *> &preservedFunctions) {
   unsigned N = size();
-
+  //addHandler("klee_assert_race", &SpecialFunctionHandler::handleAssertRaceFail);
   for (unsigned i=0; i<N; ++i) {
     HandlerInfo &hi = handlerInfo[i];
     Function *f = executor.kmodule->module->getFunction(hi.name);
@@ -970,6 +973,101 @@ void SpecialFunctionHandler::handlePThreadTestCancel(
     std::vector<ref<Expr>> &arguments) {
   // std::cerr << "catch pthread test cancel" << std::endl;
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+void SpecialFunctionHandler::handlePThreadMutexInit(
+  ExecutionState &state, KInstruction *target,
+  std::vector<ref<Expr>> &arguments) {
+
+  if (arguments.size() < 2) {
+    executor.terminateStateOnError(state, "Incorrect number of arguments to pthread_mutex_init", Executor::User);
+    return;
+  }
+
+  ref<Expr> mutex_ptr_expr = arguments[0];
+  // ref<Expr> attr_ptr_expr = arguments[1]; // Атрибуты пока игнорируем
+
+  ConstantExpr *mutexAddrCE = dyn_cast<ConstantExpr>(executor.toConstant(state, mutex_ptr_expr, "pthread_mutex_init address"));
+
+  if (!mutexAddrCE) {
+    executor.terminateStateOnError(state, "pthread_mutex_init: mutex address could not be concretized or is symbolic", Executor::User);
+    return;
+  }
+
+  uint64_t mutex_addr = mutexAddrCE->getZExtValue();
+  if (mutex_addr == 0) {
+      executor.terminateStateOnError(state, "pthread_mutex_init: mutex address is NULL", Executor::User);
+      return;
+  }
+  std::string mutexName = Transfer::uint64toString(mutex_addr);
+  std::string errorMsgFromManager;
+
+  // Пытаемся добавить мьютекс
+  bool addedSuccessfully = state.mutexManager.addMutex(mutexName, errorMsgFromManager);
+  llvm::errs() << "SFH::handlePThreadMutexInit: addMutex for '" << mutexName
+               << "' returned " << addedSuccessfully << " with msg: " << errorMsgFromManager << "\n"; // ОТЛАДКА
+  
+  if (addedSuccessfully) {
+    executor.bindLocal(target, state, ConstantExpr::create(0, Expr::Int32));
+  } else {
+    if (errorMsgFromManager.find("already exists") != std::string::npos ||
+        errorMsgFromManager.find("redefinition") != std::string::npos) {
+        klee_warning("SFH: pthread_mutex_init on already initialized/known mutex %s. Continuing as success.", mutexName.c_str());
+        executor.bindLocal(target, state, ConstantExpr::create(0, Expr::Int32)); // <<< ВОЗВРАЩАЕМ 0
+    } else {
+        klee_warning("SFH: pthread_mutex_init failed for %s: %s. Reporting error to program.", mutexName.c_str(), errorMsgFromManager.c_str());
+        executor.bindLocal(target, state, ConstantExpr::create(1, Expr::Int32));
+    }
+  }
+}
+
+void SpecialFunctionHandler::handlePThreadMutexDestroy(
+  ExecutionState &state, KInstruction *target,
+  std::vector<ref<Expr>> &arguments) {
+
+  if (arguments.empty()) {
+    executor.terminateStateOnError(state, "Incorrect number of arguments to pthread_mutex_destroy", Executor::User);
+    return;
+  }
+
+  ref<Expr> mutex_ptr_expr = arguments[0]; // Указатель на pthread_mutex_t*
+
+  // Убедимся, что адрес мьютекса конкретный
+  ConstantExpr *mutexAddrCE = dyn_cast<ConstantExpr>(executor.toConstant(state, mutex_ptr_expr, "pthread_mutex_destroy address"));
+
+  if (!mutexAddrCE) {
+    executor.terminateStateOnError(state, "pthread_mutex_destroy: mutex address could not be concretized or is symbolic", Executor::User);
+    return;
+  }
+
+  uint64_t mutex_addr = mutexAddrCE->getZExtValue();
+  if (mutex_addr == 0) {
+      executor.terminateStateOnError(state, "pthread_mutex_destroy: mutex address is NULL", Executor::User);
+      return;
+  }
+  std::string mutexName = Transfer::uint64toString(mutex_addr);
+  std::string errorMsg;
+
+// Вызываем метод в MutexManager для уничтожения мьютекса
+// MutexManager должен иметь метод вроде removeMutex или destroyMutex,
+// который проверяет, свободен ли мьютекс, и удаляет его.
+  bool success = state.mutexManager.destroyMutex(mutexName, errorMsg); // Предполагаем, что такой метод есть
+
+  if (success) {
+    executor.bindLocal(target, state, ConstantExpr::create(0, Expr::Int32)); // pthread_mutex_destroy возвращает 0 при успехе
+  } else {
+    klee_warning("SpecialFunctionHandler: pthread_mutex_destroy failed for %s: %s", mutexName.c_str(), errorMsg.c_str());
+    // pthread_mutex_destroy может вернуть EBUSY, EINVAL
+    // Можно вернуть смоделированный код ошибки, например, EBUSY (16) или EINVAL (22)
+    // Для простоты пока вернем ненулевое значение, например, 1
+    executor.bindLocal(target, state, ConstantExpr::create(1, Expr::Int32)); // Пример кода ошибки
+    // Можно также терминировать состояние, если это критичная ошибка
+    // executor.terminateStateOnError(state, "pthread_mutex_destroy failed: " + errorMsg, User);
+  }
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void SpecialFunctionHandler::handlePThreadMutexLock(
     ExecutionState &state, KInstruction *target,

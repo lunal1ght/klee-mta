@@ -24,6 +24,9 @@
 #include "llvm/IR/Module.h"
 #include <llvm/Support/FileSystem.h>
 
+#include "klee/Module/KModule.h" // Для доступа к KModule
+#include "llvm/Support/raw_ostream.h" // Для форматирования инструкции в строку
+
 using namespace std;
 using namespace llvm;
 
@@ -81,6 +84,113 @@ void Trace::printThreadCreateAndJoin(raw_ostream &out) {
   for (map<Event *, uint64_t>::iterator ji = joinThreadPoint.begin(), je = joinThreadPoint.end(); ji != je; ji++) {
     out << ji->first->eventName << " join Thread" << ji->second << "\n";
   }
+}
+
+std::vector<AccessInfo> Trace::getAccessHistoryForAddress(uint64_t target_address, size_t target_size, KModule *kmodule) {
+    std::vector<AccessInfo> history;
+    uint64_t target_end_address = target_address + target_size;
+
+     llvm::errs() << "DEBUG: getAccessHistoryForAddress: Target Addr=0x" << llvm::utohexstr(target_address)
+                  << ", Target Size=" << target_size << ", Num Events in Path=" << path.size() << "\n";
+
+    for (Event *event : path) {
+        if (!event || !event->inst || !event->inst->inst || event->eventType == Event::IGNORE) {
+            // llvm::errs() << "DEBUG: getAccessHistoryForAddress: Skipping invalid or ignored event\n";
+            continue;
+        }
+
+        //ищем функции которые рыгают в вывод
+        if (event->inst && event->inst->inst) {
+          llvm::errs() << "  Event Type: " << event->eventType; // Допустим, у Event есть поле eventType
+          if (event->eventType == Event::VIRTUAL) {
+              llvm::errs() << " (VIRTUAL)";
+          }
+          llvm::errs() << ", LLVM Opcode: " << event->inst->inst->getOpcodeName();
+          if (event->calledFunction) { // Если это вызов
+              llvm::errs() << ", Called Func: " << event->calledFunction->getName().str();
+          }
+          llvm::errs() << "\n";
+        }
+
+        llvm::Instruction *llvmInst = event->inst->inst;
+        bool isWriteAccess = false;
+
+        if (llvmInst->getOpcode() == llvm::Instruction::Load || llvmInst->getOpcode() == llvm::Instruction::Store) {
+            if (llvmInst->getOpcode() == llvm::Instruction::Store) {
+                isWriteAccess = true;
+            }
+
+            // Используем сохраненные concreteAddress и accessSize
+            uint64_t access_addr = event->concreteAddress;
+            unsigned access_size_bytes = event->accessSize;
+
+            llvm::errs() << "  Checking Event: Addr=0x" << llvm::utohexstr(access_addr)
+            << ", Size=" << access_size_bytes
+            << ", isWrite=" << isWriteAccess
+            << ", File=" << (event->inst->info ? event->inst->info->file : "N/A")
+            << ", Line=" << (event->inst->info ? event->inst->info->line : 0) << "\n";
+
+            if (access_addr == 0 && access_size_bytes == 0) { // Если не были установлены (например, символический адрес)
+                llvm::errs() << "DEBUG: Event has no concrete address/size, skipping intersection check.\n";
+                continue;
+            }
+
+            uint64_t access_end_addr = access_addr + access_size_bytes;
+            uint64_t target_end_address = target_address + target_size;
+
+            // Проверка на пересечение диапазонов
+            /*if (access_addr < target_end_address && target_address < access_end_addr) {
+                AccessInfo info;
+                info.threadId = event->threadId;
+                info.isWrite = isWriteAccess;
+
+                history.push_back(info);
+                if (event->inst->info) {
+                    info.file = event->inst->info->file;
+                    info.line = event->inst->info->line;
+                } else {
+                    info.file = "N/A";
+                    info.line = 0;
+                }
+                std::string instStr;
+                llvm::raw_string_ostream rso_inst(instStr); // Используем другое имя для ostream
+                llvmInst->print(rso_inst);
+                info.instructionString = rso_inst.str();
+                history.push_back(info);
+                // llvm::errs() << "DEBUG: Found relevant access: Thread " << event->threadId << ...
+            }*/
+
+            if (access_addr < target_end_address && target_address < access_end_addr) {
+              AccessInfo info; // Создаем здесь
+              info.threadId = event->threadId;
+              info.isWrite = isWriteAccess;
+          
+              if (event->inst && event->inst->info) { // Проверка на nullptr
+                  info.file = event->inst->info->file;
+                  info.line = event->inst->info->line;
+              } else {
+                  info.file = "N/A";
+                  info.line = 0;
+              }
+              if (event->inst && event->inst->inst) { // Проверка на nullptr
+                  std::string instStr;
+                  llvm::raw_string_ostream rso_inst(instStr);
+                  event->inst->inst->print(rso_inst);
+                  info.instructionString = rso_inst.str();
+              } else {
+                  info.instructionString = "N/A";
+              }
+              history.push_back(info);
+              llvm::errs() << "    MATCH FOUND! Target [0x" << llvm::utohexstr(target_address) << ", 0x" << llvm::utohexstr(target_end_address)
+              << "), Access [0x" << llvm::utohexstr(access_addr) << ", 0x" << llvm::utohexstr(access_end_addr) << ")\n";
+            }
+
+        }
+    }
+    // if (history.empty()) {
+    //      llvm::errs() << "DEBUG: getAccessHistoryForAddress: No relevant accesses found for target range.\n";
+    // }
+    return history;
 }
 
 void Trace::printWaitAndSignal(raw_ostream &out) {
